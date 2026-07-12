@@ -1,0 +1,302 @@
+<!DOCTYPE html>
+<!--
+  PROTOTYPE — throwaway mock for ticket 06 (Kiro Usage Dashboard, Grafana design).
+  NOT production. Static HTML mock of the Managed Grafana dashboard so we can react to
+  layout before standing anything up. Two radically different layout variants:
+    ?variant=a  → "Fleet overview"          (all users: KPIs + per-user compare + cap-by-user)
+    ?variant=b  → "Single-user drilldown"    (pick one user: models + detail + their cap)
+  Sample data mirrors ticket 01 findings (dwalleck@proton.me, PRO_MAX, 2026-06-20..07-10,
+  models: auto / claude_haiku_4.5 / claude_sonnet_5 / claude_opus_4.8 / glm_5).
+  All numbers are fabricated for shape only. Open in a browser; toggle via the bottom bar.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Kiro Usage — Grafana mock (PROTOTYPE)</title>
+<style>
+  :root {
+    --bg:#111217; --panel:#181b1f; --panel-b:#23262b; --text:#d8d9da; --muted:#8e9297;
+    --accent:#f28c1b; --blue:#5794f2; --green:#73bf69; --purple:#b877d9; --red:#e02f44;
+    --grid:#22252b;
+  }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--text);
+         font:13px/1.4 -apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif; }
+  header { display:flex; align-items:center; gap:12px; padding:10px 16px;
+           background:#0b0c0e; border-bottom:1px solid var(--panel-b); }
+  header .logo { width:22px;height:22px;border-radius:5px;
+                 background:linear-gradient(135deg,var(--accent),#d9701a); }
+  header h1 { font-size:15px; margin:0; font-weight:600; }
+  header .tag { font-size:11px; color:#0b0c0e; background:var(--accent);
+                padding:1px 6px; border-radius:4px; font-weight:700; }
+  .varbar { display:flex; gap:10px; align-items:center; flex-wrap:wrap;
+            padding:8px 16px; background:var(--panel); border-bottom:1px solid var(--panel-b); }
+  .tmpl { display:flex; align-items:center; gap:6px; }
+  .tmpl label { color:var(--muted); font-size:11px; text-transform:uppercase; letter-spacing:.4px; }
+  .pill { background:#0b0c0e; border:1px solid var(--panel-b); border-radius:4px;
+          padding:3px 9px; color:var(--text); font-size:12px; }
+  .pill.on { border-color:var(--accent); color:#fff; }
+  .grid { display:grid; gap:10px; padding:12px 16px; }
+  .panel { background:var(--panel); border:1px solid var(--panel-b); border-radius:6px;
+           padding:10px 12px; min-height:60px; }
+  .panel h3 { margin:0 0 8px; font-size:12px; font-weight:600; color:var(--muted);
+              text-transform:uppercase; letter-spacing:.5px; }
+  .panel .src { float:right; font-size:9px; color:#5a5e63; text-transform:none; letter-spacing:0; }
+  .stat { text-align:left; }
+  .stat .big { font-size:30px; font-weight:700; }
+  .stat .sub { color:var(--muted); font-size:11px; }
+  .stat .big.orange{color:var(--accent);} .stat .big.blue{color:var(--blue);}
+  .stat .big.green{color:var(--green);} .stat .big.purple{color:var(--purple);}
+  table { width:100%; border-collapse:collapse; font-size:12px; }
+  th,td { text-align:left; padding:5px 8px; border-bottom:1px solid var(--grid); }
+  th { color:var(--muted); font-weight:600; }
+  .legend { display:flex; gap:12px; flex-wrap:wrap; margin-top:6px; font-size:11px; color:var(--muted); }
+  .legend i { display:inline-block; width:9px;height:9px;border-radius:2px;margin-right:4px;vertical-align:middle;}
+  .note { padding:6px 16px; color:var(--muted); font-size:11px; font-style:italic; }
+  /* floating variant switcher */
+  .switch { position:fixed; bottom:14px; left:50%; transform:translateX(-50%);
+            background:#0b0c0e; border:1px solid var(--panel-b); border-radius:24px;
+            padding:6px 8px; display:flex; gap:6px; box-shadow:0 6px 24px rgba(0,0,0,.5); z-index:9;}
+  .switch a { text-decoration:none; color:var(--muted); padding:6px 14px; border-radius:18px; font-size:12px;}
+  .switch a.on { background:var(--accent); color:#0b0c0e; font-weight:700; }
+  .rail { display:flex; gap:10px; }
+  .rail .side { flex:0 0 210px; }
+  .rail .main { flex:1; display:grid; gap:10px; }
+  .filterbox { background:var(--panel); border:1px solid var(--panel-b); border-radius:6px; padding:10px 12px; }
+  .filterbox h4 { margin:2px 0 8px; font-size:11px; color:var(--muted); text-transform:uppercase; }
+  .filterbox .opt { padding:5px 8px; border-radius:4px; margin-bottom:3px; cursor:default; }
+  .filterbox .opt.on { background:#26303f; color:#fff; }
+  .bar-h { display:flex; align-items:center; gap:8px; margin:5px 0; }
+  .bar-h .lbl { width:130px; font-size:11px; color:var(--text); text-align:right; }
+  .bar-h .track { flex:1; background:#0b0c0e; border-radius:3px; height:16px; overflow:hidden; }
+  .bar-h .fill { height:100%; }
+  .bar-h .val { width:48px; font-size:11px; color:var(--muted); }
+</style>
+</head>
+<body>
+<header>
+  <div class="logo"></div>
+  <h1>Kiro Usage</h1>
+  <span class="tag">PROTOTYPE MOCK</span>
+  <span style="color:var(--muted);font-size:12px;">Athena · workgroup <b>kiro-usage</b> · db <b>kiro_usage</b> · SSO (IAM Identity Center)</span>
+</header>
+
+<!-- Template variables (Grafana dashboard variables) -->
+<div class="varbar">
+  <div class="tmpl"><label>time range</label>
+    <span class="pill on">2026-06-20 → 2026-07-10</span></div>
+  <div class="tmpl"><label>$user_email</label>
+    <span class="pill on">dwalleck@proton.me</span>
+    <span class="pill">All</span></div>
+  <div class="tmpl"><label>$client_type</label>
+    <span class="pill on">KIRO_CLI</span><span class="pill on">KIRO_IDE</span><span class="pill">PLUGIN</span></div>
+  <div class="tmpl"><label>$model</label><span class="pill on">All</span></div>
+</div>
+
+<div id="app"></div>
+<div class="note">Sample data is fabricated for layout only — the real Target List has 1 user today (ticket 01); 5 shown so the fleet view is legible. Variant A = fleet overview (all users); Variant B = single-user drilldown. Switch below.</div>
+
+<div class="switch" id="switch">
+  <a href="?variant=a" data-v="a">A · Fleet overview</a>
+  <a href="?variant=b" data-v="b">B · User drilldown</a>
+</div>
+
+<script>
+// ---- fabricated sample data (mirrors ticket 01 shape) ----
+const days = [];
+const start = new Date('2026-06-20');
+for (let i=0;i<21;i++){ const d=new Date(start); d.setDate(d.getDate()+i);
+  const iso=d.toISOString().slice(0,10);
+  if(iso==='2026-06-27'||iso==='2026-06-28') continue; // real gaps
+  days.push(iso);
+}
+function rnd(seed){ let x=Math.sin(seed)*10000; return x-Math.floor(x); }
+const daily = days.map((iso,i)=>({
+  date: iso,
+  credits: +(40+rnd(i+1)*120).toFixed(1),
+  messages: Math.round(60+rnd(i+7)*90),
+  conversations: Math.round(3+rnd(i+3)*8),
+  overage: 0,
+}));
+const MODELS = [
+  {name:'claude_opus_4.8', color:'var(--accent)', msgs:842},
+  {name:'claude_sonnet_5', color:'var(--blue)',  msgs:511},
+  {name:'auto',            color:'var(--green)',  msgs:388},
+  {name:'claude_haiku_4.5',color:'var(--purple)', msgs:203},
+  {name:'glm_5',           color:'var(--red)',    msgs:96},
+];
+const totCredits = daily.reduce((s,d)=>s+d.credits,0).toFixed(0);
+const totMsgs = daily.reduce((s,d)=>s+d.messages,0);
+const totConv = daily.reduce((s,d)=>s+d.conversations,0);
+
+// ---- fabricated FLEET of users (real data has 1 today — ticket 01 — these exist only so
+//      the multi-user overview layout is legible to react to) ----
+const USERS = [
+  {email:'dwalleck@proton.me', tier:'PRO_MAX', mtd:1908, cap:2500, msgs:2030, conv:142, top:'claude_opus_4.8'},
+  {email:'carol@example.com',  tier:'PRO',     mtd:2410, cap:2500, msgs:1760, conv:120, top:'claude_sonnet_5'},
+  {email:'alice@example.com',  tier:'PRO_MAX', mtd:1320, cap:2500, msgs:1490, conv:98,  top:'claude_opus_4.8'},
+  {email:'bob@example.com',    tier:'PRO',     mtd:640,  cap:2500, msgs:720,  conv:51,  top:'auto'},
+  {email:'dave@example.com',   tier:'FREE',    mtd:110,  cap:500,  msgs:180,  conv:14,  top:'glm_5'},
+];
+const fleetCredits = USERS.reduce((s,u)=>s+u.mtd,0);
+const fleetMsgs = USERS.reduce((s,u)=>s+u.msgs,0);
+const fleetConv = USERS.reduce((s,u)=>s+u.conv,0);
+const nearCap = USERS.filter(u=>u.mtd/u.cap>=0.9).length;
+const tierCounts = USERS.reduce((m,u)=>(m[u.tier]=(m[u.tier]||0)+1,m),{});
+
+// ---- tiny SVG chart helpers (no libs) ----
+function lineChart(series, h=140){
+  const w=560, pad=24, max=Math.max(...series.flatMap(s=>s.data));
+  const xs=(i,n)=>pad+(i*(w-2*pad)/(n-1));
+  const ys=v=>h-18-(v/max)*(h-34);
+  let out=`<svg viewBox="0 0 ${w} ${h}" width="100%" height="${h}" preserveAspectRatio="none">`;
+  for(let g=0;g<=3;g++){const y=18+g*(h-34)/3; out+=`<line x1="${pad}" y1="${y}" x2="${w-pad}" y2="${y}" stroke="var(--grid)"/>`;}
+  series.forEach(s=>{
+    const pts=s.data.map((v,i)=>`${xs(i,s.data.length)},${ys(v)}`).join(' ');
+    out+=`<polyline points="${pts}" fill="none" stroke="${s.color}" stroke-width="2"/>`;
+    s.data.forEach((v,i)=>{out+=`<circle cx="${xs(i,s.data.length)}" cy="${ys(v)}" r="2" fill="${s.color}"/>`;});
+  });
+  return out+`</svg>`;
+}
+function stackedBar(days, h=150){
+  const w=560, pad=24, n=days.length;
+  const tot=days.map(d=>d.messages);
+  const max=Math.max(...tot);
+  const bw=(w-2*pad)/n*0.7;
+  let out=`<svg viewBox="0 0 ${w} ${h}" width="100%" height="${h}">`;
+  days.forEach((d,i)=>{
+    const x=pad+i*(w-2*pad)/n; let acc=0;
+    // fake per-model split proportional to that day's messages
+    MODELS.forEach((m,mi)=>{
+      const frac=[0.42,0.24,0.18,0.11,0.05][mi];
+      const val=d.messages*frac; const bh=(val/max)*(h-30);
+      const y=h-16-acc-bh; acc+=bh;
+      out+=`<rect x="${x}" y="${y}" width="${bw}" height="${bh}" fill="${m.color}"/>`;
+    });
+  });
+  return out+`</svg>`;
+}
+function hbars(items, unit=''){
+  const max=Math.max(...items.map(i=>i.msgs));
+  return items.map(m=>`<div class="bar-h"><div class="lbl">${m.name}</div>
+    <div class="track"><div class="fill" style="width:${(m.msgs/max*100).toFixed(0)}%;background:${m.color}"></div></div>
+    <div class="val">${m.msgs}${unit}</div></div>`).join('');
+}
+function modelLegend(){ return `<div class="legend">`+MODELS.map(m=>`<span><i style="background:${m.color}"></i>${m.name}</span>`).join('')+`</div>`; }
+// threshold-colored horizontal cap gauge
+const CAP = 2500;
+function capColor(p){ return p<70?'var(--green)':p<90?'var(--accent)':'var(--red)'; }
+function capGauge(user, mtd){
+  const pct=Math.min(100, mtd/CAP*100);
+  // naive linear projection to end of month (range ~19 days into a 30-day month)
+  const proj=Math.round(mtd/19*30);
+  const projPct=Math.min(100, proj/CAP*100);
+  return `<div style="margin:8px 0 14px;">
+    <div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:3px;">
+      <span>${user}</span><span style="color:var(--muted)">${mtd.toFixed(0)} / ${CAP} credits · <b style="color:${capColor(pct)}">${pct.toFixed(0)}%</b></span></div>
+    <div class="track" style="height:20px;background:#0b0c0e;border-radius:4px;position:relative;">
+      <div class="fill" style="height:100%;border-radius:4px;width:${pct}%;background:${capColor(pct)};"></div>
+      <div title="projected month-end ${proj}" style="position:absolute;top:-3px;height:26px;width:2px;background:#fff;left:${projPct}%;"></div>
+    </div>
+    <div style="font-size:10px;color:var(--muted);margin-top:2px;">white marker = projected month-end (${proj} credits, ${projPct.toFixed(0)}%)</div>
+  </div>`;
+}
+// multi-user cap proximity: one bar per user, sorted by utilisation desc
+function capGaugeMulti(users){
+  return [...users].sort((a,b)=>b.mtd/b.cap-a.mtd/a.cap).map(u=>{
+    const pct=Math.min(100,u.mtd/u.cap*100);
+    return `<div class="bar-h"><div class="lbl" style="width:170px">${u.email}</div>
+      <div class="track"><div class="fill" style="width:${pct}%;background:${capColor(pct)}"></div></div>
+      <div class="val" style="width:110px;color:${capColor(pct)}">${u.mtd}/${u.cap} · ${pct.toFixed(0)}%</div></div>`;
+  }).join('');
+}
+// lead alert: users at/over 90% of cap (the thing the demo audience reacts to first)
+function capAlert(users){
+  const over=[...users].filter(u=>u.mtd/u.cap>=0.9).sort((a,b)=>b.mtd/b.cap-a.mtd/a.cap);
+  if(!over.length) return `<div style="background:#12291a;border:1px solid var(--green);border-radius:6px;padding:10px 12px;color:var(--green);font-weight:600;">✓ No users over 90% of cap</div>`;
+  return `<div style="background:#2a1113;border:1px solid var(--red);border-radius:6px;padding:10px 12px;">
+    <div style="color:var(--red);font-weight:700;margin-bottom:6px;">⚠ ${over.length} user${over.length>1?'s':''} over 90% of cap</div>
+    ${over.map(u=>{const pct=(u.mtd/u.cap*100).toFixed(0);return `<div style="display:flex;justify-content:space-between;font-size:13px;padding:3px 0;">
+      <span><b>${u.email}</b> <span style="color:var(--muted)">· ${u.tier}</span></span>
+      <span style="color:var(--red);font-weight:700">${u.mtd}/${u.cap} · ${pct}%</span></div>`;}).join('')}
+  </div>`;
+}
+// generic horizontal bars from arbitrary {label,value,color}
+function hbars2(items){
+  const max=Math.max(...items.map(i=>i.value));
+  return items.map(it=>`<div class="bar-h"><div class="lbl" style="width:170px">${it.label}</div>
+    <div class="track"><div class="fill" style="width:${(it.value/max*100).toFixed(0)}%;background:${it.color||'var(--blue)'}"></div></div>
+    <div class="val">${it.value}</div></div>`).join('');
+}
+
+// ---- variants ----
+function variantA(){
+  const tierColors={PRO_MAX:'var(--purple)',PRO:'var(--blue)',FREE:'var(--muted)'};
+  return `
+  <div class="grid" style="grid-template-columns:repeat(4,1fr);">
+    <div class="panel stat"><h3>Active users<span class="src">usage_daily · count(distinct user_email)</span></h3><div class="big blue">${USERS.length}</div><div class="sub">in range · Target List</div></div>
+    <div class="panel stat"><h3>Fleet credits (MTD)<span class="src">usage_daily · sum(credits_used)</span></h3><div class="big orange">${fleetCredits}</div><div class="sub">across all users</div></div>
+    <div class="panel stat"><h3>Fleet messages<span class="src">usage_daily · sum(total_messages)</span></h3><div class="big green">${fleetMsgs}</div><div class="sub">${fleetConv} conversations</div></div>
+    <div class="panel stat"><h3>Users near cap<span class="src">usage_daily · MTD/cap ≥ 90%</span></h3><div class="big" style="color:${nearCap?'var(--red)':'var(--green)'}">${nearCap}</div><div class="sub">of ${USERS.length} users</div></div>
+  </div>
+  <div class="grid" style="grid-template-columns:1fr;">
+    <div class="panel"><h3>Users over cap threshold — alert<span class="src">usage_daily · sum(credits_used) MTD / max(overage_cap) ≥ 90%</span></h3>
+      ${capAlert(USERS)}
+      <details style="margin-top:10px;"><summary style="cursor:pointer;color:var(--muted);font-size:12px;">All users — cap proximity (sorted)</summary>
+        <div style="margin-top:8px;">${capGaugeMulti(USERS)}</div>
+        <div style="font-size:11px;color:var(--muted);margin-top:6px;">Thresholds: <b style="color:var(--green)">&lt;70%</b> ok · <b style="color:var(--accent)">70–90%</b> warn · <b style="color:var(--red)">&gt;90%</b> at risk.</div>
+      </details></div>
+  </div>
+  <div class="grid" style="grid-template-columns:1fr 1fr;">
+    <div class="panel"><h3>Credits by user<span class="src">usage_daily · sum(credits_used) by user_email</span></h3>
+      ${hbars2([...USERS].sort((a,b)=>b.mtd-a.mtd).map(u=>({label:u.email,value:u.mtd,color:'var(--accent)'})))}</div>
+    <div class="panel"><h3>Messages by user<span class="src">usage_daily · sum(total_messages) by user_email</span></h3>
+      ${hbars2([...USERS].sort((a,b)=>b.msgs-a.msgs).map(u=>({label:u.email,value:u.msgs,color:'var(--blue)'})))}</div>
+  </div>
+  <div class="grid" style="grid-template-columns:2fr 1fr;">
+    <div class="panel"><h3>Fleet credits over time<span class="src">usage_daily · sum(credits_used) by date</span></h3>
+      ${lineChart([{data:daily.map(d=>d.credits*3.1),color:'var(--accent)'}])}
+      <div class="legend"><span><i style="background:var(--accent)"></i>all selected users</span></div></div>
+    <div class="panel"><h3>Users by tier<span class="src">usage_daily · count(distinct user_email) by subscription_tier</span></h3>
+      ${hbars2(Object.entries(tierCounts).map(([t,c])=>({label:t,value:c,color:tierColors[t]})))}</div>
+    <div class="panel"><h3>Messages by model (fleet)<span class="src">model_messages · sum(messages) by model</span></h3>
+      ${hbars(MODELS)}</div>
+    <div class="panel"><h3>Client type split<span class="src">usage_daily · sum(total_messages) by client_type</span></h3>
+      ${hbars2([{label:'KIRO_CLI',value:4200,color:'var(--blue)'},{label:'KIRO_IDE',value:1980,color:'var(--green)'},{label:'PLUGIN',value:0,color:'var(--muted)'}])}</div>
+  </div>`;
+}
+function variantB(){
+  return `<div class="grid"><div class="rail">
+    <div class="side">
+      <div class="filterbox"><h4>$user_email · pick one</h4>
+        ${USERS.map((u,i)=>`<div class="opt ${i===0?'on':''}">${u.email}</div>`).join('')}</div>
+      <div class="filterbox"><h4>$client_type</h4>
+        <div class="opt on">KIRO_CLI</div><div class="opt on">KIRO_IDE</div><div class="opt">PLUGIN</div></div>
+      <div class="filterbox"><h4>$model</h4>
+        ${MODELS.map(m=>`<div class="opt on">${m.name}</div>`).join('')}</div>
+      <div class="filterbox"><h4>this user's cap</h4>${capGauge('dwalleck@proton.me', +totCredits)}</div>
+    </div>
+    <div class="main">
+      <div class="panel"><h3>Messages by model over time<span class="src">model_messages</span></h3>
+        ${stackedBar(daily)}${modelLegend()}</div>
+      <div class="grid" style="grid-template-columns:1fr 1fr;padding:0;">
+        <div class="panel"><h3>Model share<span class="src">model_messages · sum(messages) by model</span></h3>${hbars(MODELS)}</div>
+        <div class="panel"><h3>Credits vs messages<span class="src">usage_daily</span></h3>
+          ${lineChart([{data:daily.map(d=>d.credits),color:'var(--accent)'},{data:daily.map(d=>d.messages),color:'var(--blue)'}])}
+          <div class="legend"><span><i style="background:var(--accent)"></i>credits_used</span><span><i style="background:var(--blue)"></i>total_messages</span></div></div>
+      </div>
+      <div class="panel"><h3>Per-user / day detail<span class="src">usage_daily JOIN model rollup</span></h3>
+        <table><thead><tr><th>date</th><th>user_email</th><th>client_type</th><th>tier</th><th>credits</th><th>msgs</th><th>convs</th><th>top model</th></tr></thead><tbody>
+        ${daily.slice(-6).map((d,i)=>`<tr><td>${d.date}</td><td>dwalleck@proton.me</td><td>${i%2?'KIRO_IDE':'KIRO_CLI'}</td><td>PRO_MAX</td><td>${d.credits}</td><td>${d.messages}</td><td>${d.conversations}</td><td>${MODELS[i%3].name}</td></tr>`).join('')}
+        </tbody></table></div>
+    </div>
+  </div></div>`;
+}
+
+const v = (new URLSearchParams(location.search).get('variant')||'a').toLowerCase();
+document.getElementById('app').innerHTML = v==='b'?variantB():variantA();
+document.querySelectorAll('#switch a').forEach(a=>{ if(a.dataset.v===v) a.classList.add('on'); });
+</script>
+</body>
+</html>
