@@ -8,7 +8,7 @@ raw bucket.
 
 **Blocked by:** None — can start immediately.
 
-**Status:** ready-for-human (implementation complete; needs `cdk deploy` with AWS creds)
+**Status:** resolved (deployed to `369434902231` / `us-east-1`)
 
 - [x] Existing sample CDK is treated as replaceable: the throwaway sample buckets
       (`kiro-prompt-logs`, `kiro-activity-reports`) no longer provisioned; stack restructured
@@ -23,7 +23,7 @@ raw bucket.
       not SecureString), seeded with `dwalleck@proton.me`.
 - [x] `UseCustomKey` toggle honored on both buckets (SSE-S3 when off; the CMK path stays
       additive per the spec's documented delta).
-- [ ] `cdk deploy` succeeds against account `369434902231` / `us-east-1`; both buckets and the
+- [x] `cdk deploy` succeeds against account `369434902231` / `us-east-1`; both buckets and the
       parameter exist with the policies above.
 
 ## Implementation notes
@@ -46,5 +46,11 @@ Implemented in `src/KiroInfra/KiroInfraStack.cs` (full rewrite of the sample sta
 **Verification:** `dotnet build` clean; synthesized via `dotnet run` (no `cdk` CLI in the env)
 for both `UseCustomKey=false` (SSE-S3/AES256 on both buckets, zero KMS) and `UseCustomKey=true`
 (one KMS key, both buckets `aws:kms`). Template asserts: KiroWrite policy on raw only, 14-day
-`athena-results/` expiry, `StringList` param. **Live `cdk deploy` not run** — no AWS credentials
-in this environment; final checkbox is the human deploy step.
+`athena-results/` expiry, `StringList` param.
+
+**Deployed** to `369434902231` / `us-east-1` (stack `KiroInfraStack`, `UseCustomKey=false`).
+Live-verified: raw bucket policy carries the `KiroWrite` + Deny-non-TLS statements; analytics
+bucket has the `ExpireAthenaResults` 14-day rule on `athena-results/`; SSM `/kiro-usage/target-list`
+is a `StringList` = `dwalleck@proton.me`. Outputs — `RawBucketUri` =
+`s3://kiro-usage-raw-369434902231-us-east-1/` (re-point Kiro's User Activity Report location here),
+`AnalyticsBucketName` = `kiro-usage-analytics-369434902231-us-east-1`.

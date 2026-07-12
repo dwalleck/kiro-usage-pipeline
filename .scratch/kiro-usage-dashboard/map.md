@@ -86,6 +86,15 @@ stops at a hand-off-able spec (plus the grounding facts the spec needs).
   CDK is treated as replaceable sample code** (`CreateKiroBucket` kept only as a reference
   shape). Map complete.
 
+- [08 — CDK foundation: buckets + Target List](issues/08-cdk-foundation-buckets-target-list.md)
+  — **IMPLEMENTED & DEPLOYED** to `369434902231`/`us-east-1`. `KiroInfraStack.cs` rewritten:
+  raw bucket `kiro-usage-raw-…` (BLOCK_ALL, EnforceSSL, RETAIN, SSE-S3, `KiroWrite` policy) +
+  analytics bucket `kiro-usage-analytics-…` (same protections + 14-day `athena-results/`
+  expiry) via a shared `CreateProtectedBucket` helper; Target List = plain Standard SSM
+  `StringList` `/kiro-usage/target-list` seeded `dwalleck@proton.me`; `UseCustomKey` toggle
+  honored on both. Next frontier: **09** (Glue + Athena) and **10** (ingest Lambda), both
+  unblocked and parallel-able.
+
 ## Not yet specified
 
 <!-- in-scope fog; graduates into tickets as the frontier advances -->
