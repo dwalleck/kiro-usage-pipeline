@@ -77,6 +77,10 @@ namespace KiroInfra
                 StringListValue = ["dwalleck@proton.me"],
             });
 
+            // Query layer: Glue database + the two projected fact tables and the
+            // kiro-usage Athena workgroup, all reading the analytics bucket.
+            new QueryLayer(this, "QueryLayer", analyticsBucket);
+
             new CfnOutput(this, "RawBucketUri", new CfnOutputProps
             {
                 Value = $"s3://{rawBucket.BucketName}/",
@@ -93,6 +97,18 @@ namespace KiroInfra
             {
                 Value = targetList.ParameterName,
                 Description = "SSM StringList parameter holding the Target List of User Emails",
+            });
+
+            new CfnOutput(this, "GlueDatabaseName", new CfnOutputProps
+            {
+                Value = QueryLayer.DatabaseName,
+                Description = "Glue database holding usage_daily + model_messages",
+            });
+
+            new CfnOutput(this, "AthenaWorkGroupName", new CfnOutputProps
+            {
+                Value = QueryLayer.WorkGroupName,
+                Description = "Athena workgroup for Kiro usage queries",
             });
         }
 

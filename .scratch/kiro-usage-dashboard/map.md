@@ -95,6 +95,16 @@ stops at a hand-off-able spec (plus the grounding facts the spec needs).
   honored on both. Next frontier: **09** (Glue + Athena) and **10** (ingest Lambda), both
   unblocked and parallel-able.
 
+- [09 — Glue catalog + Athena workgroup](issues/09-glue-catalog-athena-workgroup.md)
+  — **IMPLEMENTED & DEPLOYED** to `369434902231`/`us-east-1`. New `QueryLayer` construct:
+  Glue DB `kiro_usage`; `usage_daily` (11 body cols) + `model_messages` (4 cols) EXTERNAL
+  Parquet tables, partition keys `date`+`client_type` (body-excluded), identical partition
+  projection (`date` 2026-06-01,NOW / 1 DAYS; `client_type` enum KIRO_CLI,KIRO_IDE,PLUGIN;
+  `storage.location.template` with `${date}/${client_type}`); Athena workgroup `kiro-usage`
+  (enforced config, 1 GiB scan cap, CW metrics, `athena-results/` location). Live-verified:
+  both empty tables return 0 rows in the workgroup with no schema/projection error. Next
+  frontier: **10** (ingest Lambda, still unblocked); 11/12/13 unblock after 10.
+
 ## Not yet specified
 
 <!-- in-scope fog; graduates into tickets as the frontier advances -->
