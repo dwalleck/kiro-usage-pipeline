@@ -96,6 +96,30 @@ namespace KiroInfra
                 Description = "Ingest Lambda function name — use for backfill invoke",
             });
 
+            new CfnOutput(this, "IngestDlqName", new CfnOutputProps
+            {
+                Value = ingest.DeadLetterQueue.QueueName,
+                Description = "Ingest dead-letter queue — holds reports that failed after retries",
+            });
+
+            new CfnOutput(this, "IngestDlqUrl", new CfnOutputProps
+            {
+                Value = ingest.DeadLetterQueue.QueueUrl,
+                Description = "Ingest dead-letter queue URL — poll for failed reports",
+            });
+
+            new CfnOutput(this, "IngestErrorAlarmName", new CfnOutputProps
+            {
+                Value = ingest.ErrorAlarm.AlarmName,
+                Description = "CloudWatch alarm — Lambda errors",
+            });
+
+            new CfnOutput(this, "IngestDlqAlarmName", new CfnOutputProps
+            {
+                Value = ingest.DlqDepthAlarm.AlarmName,
+                Description = "CloudWatch alarm — DLQ message depth",
+            });
+
             new CfnOutput(this, "RawBucketUri", new CfnOutputProps
             {
                 Value = $"s3://{rawBucket.BucketName}/",

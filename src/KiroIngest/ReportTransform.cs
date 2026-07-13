@@ -31,12 +31,12 @@ public static partial class ReportTransform
     [GeneratedRegex("^[a-z0-9._]+_messages$")]
     private static partial Regex ModelColumnPattern();
 
-    public static IReadOnlyList<FactPartition> Transform(string csvText, ISet<string> targetEmails)
+    public static TransformResult Transform(string csvText, ISet<string> targetEmails)
     {
         var (header, rows) = Csv.Parse(csvText);
         if (header.Length == 0)
         {
-            return [];
+            return new TransformResult { RowsRead = 0, RowsKept = 0, Partitions = [] };
         }
 
         var index = new Dictionary<string, int>(StringComparer.Ordinal);
@@ -56,6 +56,7 @@ public static partial class ReportTransform
         }
 
         var partitions = new Dictionary<(string Date, string ClientType), FactPartition>();
+        var rowsKept = 0;
 
         foreach (var row in rows)
         {
@@ -66,6 +67,8 @@ public static partial class ReportTransform
             {
                 continue;
             }
+
+            rowsKept++;
 
             var date = Field(row, index, ColDate);
             var clientType = Field(row, index, ColClientType);
@@ -112,7 +115,12 @@ public static partial class ReportTransform
             }
         }
 
-        return [.. partitions.Values];
+        return new TransformResult
+        {
+            RowsRead = rows.Count,
+            RowsKept = rowsKept,
+            Partitions = [.. partitions.Values],
+        };
     }
 
     // Deterministic output key: source CSV basename + .parquet under the partition

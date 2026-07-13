@@ -27,10 +27,12 @@ public class ReportTransformTests
     [Test]
     public async Task Transform_KiroCliCsv_MapsAllUsageDailyFields()
     {
-        var partitions = ReportTransform.Transform(KiroCliCsv, Targets(TargetEmail));
+        var result = ReportTransform.Transform(KiroCliCsv, Targets(TargetEmail));
 
-        await Assert.That(partitions.Count).IsEqualTo(1);
-        var p = partitions[0];
+        await Assert.That(result.RowsRead).IsEqualTo(1);
+        await Assert.That(result.RowsKept).IsEqualTo(1);
+        await Assert.That(result.Partitions.Count).IsEqualTo(1);
+        var p = result.Partitions[0];
         await Assert.That(p.Date).IsEqualTo("2026-07-10");
         await Assert.That(p.ClientType).IsEqualTo("KIRO_CLI");
         await Assert.That(p.UsageDaily.Count).IsEqualTo(1);
@@ -52,7 +54,7 @@ public class ReportTransformTests
     [Test]
     public async Task Transform_KiroCliCsv_UnpivotsModelsPreservingDots()
     {
-        var p = ReportTransform.Transform(KiroCliCsv, Targets(TargetEmail))[0];
+        var p = ReportTransform.Transform(KiroCliCsv, Targets(TargetEmail)).Partitions[0];
 
         await Assert.That(p.ModelMessages.Count).IsEqualTo(2);
         await Assert.That(p.ModelMessages.Single(m => m.Model == "claude_haiku_4.5").Messages).IsEqualTo(8L);
@@ -64,7 +66,7 @@ public class ReportTransformTests
     [Test]
     public async Task Transform_KiroIdeCsv_MapsAutoMessagesToAutoModel()
     {
-        var p = ReportTransform.Transform(KiroIdeCsv, Targets(TargetEmail))[0];
+        var p = ReportTransform.Transform(KiroIdeCsv, Targets(TargetEmail)).Partitions[0];
 
         await Assert.That(p.ClientType).IsEqualTo("KIRO_IDE");
         await Assert.That(p.ModelMessages.Count).IsEqualTo(1);
@@ -75,9 +77,9 @@ public class ReportTransformTests
     [Test]
     public async Task Transform_UserNotInTargetList_ReturnsEmpty()
     {
-        var partitions = ReportTransform.Transform(KiroCliCsv, Targets("someone.else@example.com"));
+        var result = ReportTransform.Transform(KiroCliCsv, Targets("someone.else@example.com"));
 
-        await Assert.That(partitions.Count).IsEqualTo(0);
+        await Assert.That(result.Partitions.Count).IsEqualTo(0);
     }
 
     [Test]
@@ -87,7 +89,7 @@ public class ReportTransformTests
             StaticHeader + ",auto_messages\n" +
             "2026-07-01,\"u1\",KIRO_CLI,1,1.0,2500.0,0.0,true,\"arn\",PRO_MAX,5,false,\"dwalleck@proton.me\",5";
 
-        var p = ReportTransform.Transform(csv, Targets(TargetEmail))[0];
+        var p = ReportTransform.Transform(csv, Targets(TargetEmail)).Partitions[0];
 
         await Assert.That(p.UsageDaily[0].OverageEnabled).IsTrue();
     }
@@ -100,7 +102,7 @@ public class ReportTransformTests
             "Date,UserId,Client_Type,Overage_Cap,User_Email,auto_messages\n" +
             "2026-07-01,u1,KIRO_CLI,2500.0,dwalleck@proton.me,5";
 
-        var p = ReportTransform.Transform(csv, Targets(TargetEmail))[0];
+        var p = ReportTransform.Transform(csv, Targets(TargetEmail)).Partitions[0];
 
         await Assert.That(p.UsageDaily[0].CreditsUsed).IsEqualTo(0d);
         await Assert.That(p.UsageDaily[0].ChatConversations).IsEqualTo(0L);
@@ -113,7 +115,7 @@ public class ReportTransformTests
             StaticHeader + ",auto_messages\n" +
             "2026-07-01,\"u1\",KIRO_CLI,1,1.0,2500.0,0.0,false,\"arn\",PRO_MAX,5,false,\"dwalleck@proton.me";
 
-        var p = ReportTransform.Transform(csv, Targets(TargetEmail))[0];
+        var p = ReportTransform.Transform(csv, Targets(TargetEmail)).Partitions[0];
 
         await Assert.That(p.UsageDaily.Count).IsEqualTo(1);
         await Assert.That(p.ModelMessages).IsEmpty();
@@ -126,7 +128,7 @@ public class ReportTransformTests
             StaticHeader + ",auto_messages,claude_opus_4.8_messages\n" +
             "2026-07-01,\"u1\",KIRO_CLI,1,1.0,2500.0,0.0,false,\"arn\",PRO_MAX,5,false,\"dwalleck@proton.me\",5,-1";
 
-        var p = ReportTransform.Transform(csv, Targets(TargetEmail))[0];
+        var p = ReportTransform.Transform(csv, Targets(TargetEmail)).Partitions[0];
 
         await Assert.That(p.ModelMessages.Count).IsEqualTo(1);
         await Assert.That(p.ModelMessages[0].Model).IsEqualTo("auto");
@@ -139,7 +141,7 @@ public class ReportTransformTests
             "UserId,Client_Type,User_Email,auto_messages\n" +
             "u1,KIRO_CLI,dwalleck@proton.me,5";
 
-        var p = ReportTransform.Transform(csv, Targets(TargetEmail))[0];
+        var p = ReportTransform.Transform(csv, Targets(TargetEmail)).Partitions[0];
 
         await Assert.That(p.Date).IsEqualTo("");
     }
@@ -151,7 +153,7 @@ public class ReportTransformTests
             StaticHeader + ",auto_messages,glm_5_messages\n" +
             "2026-07-01,\"u1\",KIRO_CLI,1,1.0,2500.0,0.0,false,\"arn\",PRO_MAX,5,false,\"dwalleck@proton.me\",0,5";
 
-        var p = ReportTransform.Transform(csv, Targets(TargetEmail))[0];
+        var p = ReportTransform.Transform(csv, Targets(TargetEmail)).Partitions[0];
 
         await Assert.That(p.ModelMessages.Count).IsEqualTo(1);
         await Assert.That(p.ModelMessages[0].Model).IsEqualTo("glm_5");
@@ -166,11 +168,11 @@ public class ReportTransformTests
             "2026-07-01,\"u1\",KIRO_CLI,1,1.0,2500.0,0.0,false,\"arn\",PRO_MAX,5,false,\"dwalleck@proton.me\",5\n" +
             "2026-07-01,\"u1\",KIRO_CLI,2,2.0,2500.0,0.0,false,\"arn\",PRO_MAX,7,false,\"dwalleck@proton.me\",7";
 
-        var partitions = ReportTransform.Transform(csv, Targets(TargetEmail));
+        var result = ReportTransform.Transform(csv, Targets(TargetEmail));
 
-        await Assert.That(partitions.Count).IsEqualTo(1);
-        await Assert.That(partitions[0].UsageDaily.Count).IsEqualTo(2);
-        await Assert.That(partitions[0].ModelMessages.Count).IsEqualTo(2);
+        await Assert.That(result.Partitions.Count).IsEqualTo(1);
+        await Assert.That(result.Partitions[0].UsageDaily.Count).IsEqualTo(2);
+        await Assert.That(result.Partitions[0].ModelMessages.Count).IsEqualTo(2);
     }
 
     [Test]

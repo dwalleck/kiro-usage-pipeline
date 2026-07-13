@@ -111,7 +111,7 @@ public class IngestServiceTests
     }
 
     [Test]
-    public async Task ProcessCsv_WithContext_LogsSummaryMessage()
+    public async Task ProcessCsv_WithContext_LogsStructuredJson()
     {
         var s3 = CreateS3Mock(TestCsv);
         var ssm = CreateSsmMock(TargetEmail);
@@ -123,8 +123,16 @@ public class IngestServiceTests
 
         await service.ProcessCsv("raw-bucket", "k.csv", context.Object);
 
+        // The structured JSON log must include the required fields per ticket 13.
         mockLogger.Verify(
-            l => l.LogInformation(It.Is<string>(s => s.Contains("Ingested s3://raw-bucket/k.csv"))),
+            l => l.LogInformation(It.Is<string>(s =>
+                s.Contains("\"event\":\"ingest_complete\"") &&
+                s.Contains("\"rows_read\":") &&
+                s.Contains("\"rows_kept\":") &&
+                s.Contains("\"usage_daily_rows\":") &&
+                s.Contains("\"model_messages_rows\":") &&
+                s.Contains("\"Bucket\":\"raw-bucket\"") &&
+                s.Contains("\"Key\":\"k.csv\""))),
             Times.Once);
     }
 
@@ -413,5 +421,83 @@ public class IngestServiceTests
         s3.Verify(s => s.GetObjectAsync(
             It.IsAny<GetObjectRequest>(), It.IsAny<CancellationToken>()),
             Times.Exactly(2));
+    }
+
+    // ── Observability (ticket 13) ──────────────────────────────────────
+
+    [Test]
+    public async Task ProcessCsv_StructuredLog_HasCorrectRowCounts()
+    {
+        var s3 = CreateS3Mock(TestCsv);
+        var ssm = CreateSsmMock(TargetEmail);
+        var service = CreateService(s3, ssm);
+
+        var mockLogger = new Mock<ILambdaLogger>();
+        var context = new Mock<ILambdaContext>();
+        context.Setup(c => c.Logger).Returns(mockLogger.Object);
+
+        await service.ProcessCsv("bucket", "key.csv", context.Object);
+
+        // The single test row has 1 data row → rows_read=1, rows_kept=1 (matches target).
+        mockLogger.Verify(
+            l => l.LogInformation(It.Is<string>(s =>
+                s.Contains("\"rows_read\":1") &&
+                s.Contains("\"rows_kept\":1"))),
+            Times.Once);
+    }
+
+    [Test]
+    public async Task ProcessCsv_S3ReadError_LogsStructuredErrorAndThrows()
+    {
+        var s3 = new Mock<IAmazonS3>();
+        s3.Setup(s => s.GetObjectAsync(
+                It.IsAny<GetObjectRequest>(),
+                It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new AmazonS3Exception("Access denied"));
+        var ssm = CreateSsmMock(TargetEmail);
+        var service = CreateService(s3, ssm);
+
+        var mockLogger = new Mock<ILambdaLogger>();
+        var context = new Mock<ILambdaContext>();
+        context.Setup(c => c.Logger).Returns(mockLogger.Object);
+
+        await Assert.That(() => service.ProcessCsv("bucket", "bad-key.csv", context.Object))
+            .Throws<AmazonS3Exception>();
+
+        // The structured error log must include the required fields.
+        mockLogger.Verify(
+            l => l.LogError(It.Is<string>(s =>
+                s.Contains("\"event\":\"ingest_error\"") &&
+                s.Contains("\"Bucket\":\"bucket\"") &&
+                s.Contains("\"Key\":\"bad-key.csv\"") &&
+                s.Contains("\"error\":\"Access denied\"") &&
+                s.Contains("\"type\":\"AmazonS3Exception\""))),
+            Times.Once);
+    }
+
+    [Test]
+    public async Task ProcessCsv_RowsReadGreaterThanRowsKept_WhenTargetListFiltersOut()
+    {
+        // Two rows: one matches target, one does not.
+        var csv =
+            "Date,UserId,Client_Type,Credits_Used,Overage_Cap,User_Email,auto_messages\n" +
+            "2026-07-10,u1,KIRO_CLI,1.0,2500,dwalleck@proton.me,1\n" +
+            "2026-07-10,u2,KIRO_CLI,2.0,2500,someone.else@example.com,2";
+        var s3 = CreateS3Mock(csv);
+        var ssm = CreateSsmMock(TargetEmail);
+        var service = CreateService(s3, ssm);
+
+        var mockLogger = new Mock<ILambdaLogger>();
+        var context = new Mock<ILambdaContext>();
+        context.Setup(c => c.Logger).Returns(mockLogger.Object);
+
+        await service.ProcessCsv("bucket", "key.csv", context.Object);
+
+        // rows_read=2 (both rows), rows_kept=1 (only the matching one).
+        mockLogger.Verify(
+            l => l.LogInformation(It.Is<string>(s =>
+                s.Contains("\"rows_read\":2") &&
+                s.Contains("\"rows_kept\":1"))),
+            Times.Once);
     }
 }

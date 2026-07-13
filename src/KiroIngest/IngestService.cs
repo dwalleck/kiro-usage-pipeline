@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Text.Json;
 using Amazon.Lambda.Core;
 using Amazon.S3;
 using Amazon.S3.Model;
@@ -45,37 +46,52 @@ public sealed class IngestService : IIngestService
 
     public async Task ProcessCsv(string bucket, string key, ILambdaContext? context = null)
     {
-        var csv = await ReadObjectTextAsync(bucket, key);
-        var targets = await GetTargetEmailsAsync();
-        var partitions = ReportTransform.Transform(csv, targets);
-
-        var usageWritten = 0;
-        var modelWritten = 0;
-
-        foreach (var partition in partitions)
+        try
         {
-            if (partition.UsageDaily.Count > 0)
+            var csv = await ReadObjectTextAsync(bucket, key);
+            var targets = await GetTargetEmailsAsync();
+            var result = ReportTransform.Transform(csv, targets);
+
+            var usageWritten = 0;
+            var modelWritten = 0;
+
+            foreach (var partition in result.Partitions)
             {
-                using var parquet = await ParquetSerialization.SerializeAsync(partition.UsageDaily);
-                await WriteParquetAsync(
-                    ReportTransform.OutputKey(UsageDailyPrefix, partition.Date, partition.ClientType, key),
-                    parquet);
-                usageWritten += partition.UsageDaily.Count;
+                if (partition.UsageDaily.Count > 0)
+                {
+                    using var parquet = await ParquetSerialization.SerializeAsync(partition.UsageDaily);
+                    await WriteParquetAsync(
+                        ReportTransform.OutputKey(UsageDailyPrefix, partition.Date, partition.ClientType, key),
+                        parquet);
+                    usageWritten += partition.UsageDaily.Count;
+                }
+
+                if (partition.ModelMessages.Count > 0)
+                {
+                    using var parquet = await ParquetSerialization.SerializeAsync(partition.ModelMessages);
+                    await WriteParquetAsync(
+                        ReportTransform.OutputKey(ModelMessagesPrefix, partition.Date, partition.ClientType, key),
+                        parquet);
+                    modelWritten += partition.ModelMessages.Count;
+                }
             }
 
-            if (partition.ModelMessages.Count > 0)
+            context?.Logger.LogInformation(JsonSerializer.Serialize(new
             {
-                using var parquet = await ParquetSerialization.SerializeAsync(partition.ModelMessages);
-                await WriteParquetAsync(
-                    ReportTransform.OutputKey(ModelMessagesPrefix, partition.Date, partition.ClientType, key),
-                    parquet);
-                modelWritten += partition.ModelMessages.Count;
-            }
+                @event = "ingest_complete",
+                source = new S3Source { Bucket = bucket, Key = key },
+                rows_read = result.RowsRead,
+                rows_kept = result.RowsKept,
+                usage_daily_rows = usageWritten,
+                model_messages_rows = modelWritten,
+                partitions = result.Partitions.Count,
+            }));
         }
-
-        context?.Logger.LogInformation(
-            $"Ingested s3://{bucket}/{key}: partitions={partitions.Count}, " +
-            $"usage_daily_rows={usageWritten}, model_messages_rows={modelWritten}");
+        catch (Exception ex)
+        {
+            LogError(context, bucket, key, ex);
+            throw;
+        }
     }
 
     // Backfill: enumerate all .csv objects under the raw prefix, optionally bounded by
@@ -138,6 +154,19 @@ public sealed class IngestService : IIngestService
 
         context?.Logger.LogInformation(
             $"Backfill: complete — {processed} objects processed");
+    }
+
+    // Structured error log emitted before the exception propagates, so the Lambda
+    // invocation fails and (after retry exhaustion) the event lands on the DLQ.
+    private static void LogError(ILambdaContext? context, string bucket, string key, Exception ex)
+    {
+        context?.Logger.LogError(JsonSerializer.Serialize(new
+        {
+            @event = "ingest_error",
+            source = new S3Source { Bucket = bucket, Key = key },
+            error = ex.Message,
+            type = ex.GetType().Name,
+        }));
     }
 
     // Extract the report date from the Hive-style path segments:

@@ -29,6 +29,23 @@ public sealed class ModelMessageRecord
     [JsonPropertyName("messages")] public long Messages { get; set; }
 }
 
+// Lightweight DTO for the structured log source field, serialized as a nested
+// object in the ingest_complete and ingest_error log lines.
+public sealed class S3Source
+{
+    public string Bucket { get; set; } = "";
+    public string Key { get; set; } = "";
+}
+
+// Result of the CSV-to-facts transform, carrying row-count metadata so the
+// ingest service can emit structured observability logs.
+public sealed class TransformResult
+{
+    public required int RowsRead { get; init; }
+    public required int RowsKept { get; init; }
+    public required IReadOnlyList<FactPartition> Partitions { get; init; }
+}
+
 // The two facts for one (date, client_type) partition, ready to write as Parquet.
 public sealed class FactPartition
 {

@@ -1,7 +1,10 @@
 using Amazon.CDK;
+using Amazon.CDK.AWS.CloudWatch;
+using Amazon.CDK.AWS.IAM;
 using Amazon.CDK.AWS.Lambda;
 using Amazon.CDK.AWS.S3;
 using Amazon.CDK.AWS.S3.Notifications;
+using Amazon.CDK.AWS.SQS;
 using Amazon.CDK.AWS.SSM;
 using Constructs;
 using System.Collections.Generic;
@@ -22,6 +25,12 @@ namespace KiroInfra
         private const string LambdaProjectPath = "src/KiroIngest";
 
         public Function Function { get; }
+
+    public Queue DeadLetterQueue { get; }
+
+    public Alarm ErrorAlarm { get; }
+
+    public Alarm DlqDepthAlarm { get; }
 
         public IngestPipeline(
             Construct scope,
@@ -85,6 +94,83 @@ namespace KiroInfra
                 EventType.OBJECT_CREATED,
                 new LambdaDestination(Function),
                 new NotificationKeyFilter { Prefix = userReportPrefix, Suffix = ".csv" });
+
+            // ── Observability (ticket 13) ──────────────────────────────────
+
+            // Dead-letter queue: captures events that exhaust Lambda retries.
+            DeadLetterQueue = new Queue(this, "DeadLetterQueue", new QueueProps
+            {
+                QueueName = $"kiro-ingest-dlq-{account}",
+                RetentionPeriod = Duration.Days(14),
+                EnforceSSL = true,
+                VisibilityTimeout = Duration.Seconds(Function.Timeout!.ToSeconds() * 6),
+            });
+
+            // Route failed async invocations (after retry exhaustion) to the DLQ.
+            _ = new CfnEventInvokeConfig(this, "EventInvokeConfig", new CfnEventInvokeConfigProps
+            {
+                FunctionName = Function.FunctionName,
+                Qualifier = "$LATEST",
+                MaximumRetryAttempts = 2,
+                DestinationConfig = new CfnEventInvokeConfig.DestinationConfigProperty
+                {
+                    OnFailure = new CfnEventInvokeConfig.OnFailureProperty
+                    {
+                        Destination = DeadLetterQueue.QueueArn,
+                    },
+                },
+            });
+
+            // The async invoke destination uses the Lambda service principal
+            // (lambda.amazonaws.com), not the function execution role, to deliver
+            // failed events to SQS. Add a resource policy so the service can send.
+            DeadLetterQueue.AddToResourcePolicy(new PolicyStatement(new PolicyStatementProps
+            {
+                Sid = "AllowLambdaServiceToSend",
+                Effect = Effect.ALLOW,
+                Principals = [new ServicePrincipal("lambda.amazonaws.com")],
+                Actions = ["sqs:SendMessage"],
+                Resources = ["*"],
+                Conditions = new Dictionary<string, object>
+                {
+                    ["ArnLike"] = new Dictionary<string, string>
+                    {
+                        ["aws:SourceArn"] = Function.FunctionArn,
+                    },
+                },
+            }));
+
+            // CloudWatch alarm: Lambda errors > 0 over two consecutive evaluation periods.
+            ErrorAlarm = new Alarm(this, "LambdaErrorAlarm", new AlarmProps
+            {
+                AlarmName = $"kiro-ingest-errors-{account}",
+                AlarmDescription = "Ingest Lambda errors exceeded threshold — check DLQ for failed reports",
+                Metric = Function.MetricErrors(new MetricOptions
+                {
+                    Statistic = "Sum",
+                    Period = Duration.Minutes(1),
+                }),
+                Threshold = 1,
+                EvaluationPeriods = 2,
+                ComparisonOperator = ComparisonOperator.GREATER_THAN_OR_EQUAL_TO_THRESHOLD,
+                TreatMissingData = TreatMissingData.NOT_BREACHING,
+            });
+
+            // CloudWatch alarm: DLQ has messages waiting (something failed permanently).
+            DlqDepthAlarm = new Alarm(this, "DlqDepthAlarm", new AlarmProps
+            {
+                AlarmName = $"kiro-ingest-dlq-depth-{account}",
+                AlarmDescription = "Ingest DLQ has messages — reports failed to process after retry exhaustion",
+                Metric = DeadLetterQueue.MetricApproximateNumberOfMessagesVisible(new MetricOptions
+                {
+                    Statistic = "Sum",
+                    Period = Duration.Minutes(1),
+                }),
+                Threshold = 0,
+                EvaluationPeriods = 1,
+                ComparisonOperator = ComparisonOperator.GREATER_THAN_THRESHOLD,
+                TreatMissingData = TreatMissingData.NOT_BREACHING,
+            });
         }
     }
 }
