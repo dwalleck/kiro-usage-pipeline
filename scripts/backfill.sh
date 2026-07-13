@@ -9,13 +9,15 @@
 #   ./scripts/backfill.sh --from 2026-06-20 --to 2026-07-10  # bounded range
 #
 # Requires: aws CLI, jq, and the IngestLambdaName from `cdk deploy` output.
-# Profile/region are hardcoded for the POC deployment.
+# Defaults match the POC deployment. Override with AWS_PROFILE, AWS_REGION,
+# STACK_NAME, or OUTPUT_FILE when using another environment.
 
 set -euo pipefail
 
-PROFILE="AdministratorAccess-369434902231"
-REGION="us-east-1"
-OUTPUT_FILE="/tmp/backfill-out.json"
+PROFILE="${AWS_PROFILE:-AdministratorAccess-369434902231}"
+REGION="${AWS_REGION:-us-east-1}"
+STACK_NAME="${STACK_NAME:-KiroInfraStack}"
+OUTPUT_FILE="${OUTPUT_FILE:-/tmp/backfill-out.json}"
 
 FROM=""
 TO=""
@@ -50,7 +52,6 @@ if [ -n "$FROM" ] && [ -n "$TO" ] && [[ "$FROM" > "$TO" ]]; then
 fi
 
 # Resolve the Lambda function name from the CloudFormation stack output.
-STACK_NAME="KiroInfra"
 FN_NAME=$(aws cloudformation describe-stacks \
 	--profile "$PROFILE" \
 	--region "$REGION" \

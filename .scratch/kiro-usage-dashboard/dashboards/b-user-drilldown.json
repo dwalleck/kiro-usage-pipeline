@@ -1,4 +1,14 @@
 {
+  "__inputs": [
+    {
+      "name": "DS_ATHENA",
+      "label": "Athena",
+      "description": "Kiro usage Athena data source",
+      "type": "datasource",
+      "pluginId": "grafana-athena-datasource",
+      "pluginName": "Amazon Athena"
+    }
+  ],
   "title": "B · User Drilldown",
   "tags": ["kiro", "usage", "drilldown"],
   "timezone": "utc",
@@ -119,7 +129,7 @@
         {
           "refId": "A",
           "format": 0,
-          "rawSQL": "SELECT count(distinct model) AS model_count FROM model_messages WHERE $__dateFilter(date) AND user_email = ${user_email:sqlstring} AND client_type IN (${client_type:sqlstring})"
+          "rawSQL": "SELECT count(distinct model) AS model_count FROM model_messages WHERE $__dateFilter(date) AND user_email = ${user_email:sqlstring} AND client_type IN (${client_type:sqlstring}) AND model IN (${model:sqlstring})"
         }
       ],
       "options": { "graphMode": "none", "colorMode": "value", "textMode": "auto" },
@@ -138,7 +148,7 @@
         {
           "refId": "A",
           "format": 1,
-          "rawSQL": "SELECT date_parse(date, '%Y-%m-%d') AS time, model, sum(messages) AS messages FROM model_messages WHERE $__dateFilter(date) AND user_email = ${user_email:sqlstring} AND client_type IN (${client_type:sqlstring}) GROUP BY date, model ORDER BY 1, 3 DESC"
+          "rawSQL": "SELECT CAST(date AS timestamp) AS time, model, sum(messages) AS messages FROM model_messages WHERE $__dateFilter(date) AND user_email = ${user_email:sqlstring} AND client_type IN (${client_type:sqlstring}) AND model IN (${model:sqlstring}) GROUP BY date, model ORDER BY 1, 3 DESC"
         }
       ],
       "options": {
@@ -164,7 +174,7 @@
         {
           "refId": "A",
           "format": 0,
-          "rawSQL": "SELECT model, sum(messages) AS messages FROM model_messages WHERE $__dateFilter(date) AND user_email = ${user_email:sqlstring} AND client_type IN (${client_type:sqlstring}) GROUP BY model ORDER BY 2 DESC"
+          "rawSQL": "SELECT model, sum(messages) AS messages FROM model_messages WHERE $__dateFilter(date) AND user_email = ${user_email:sqlstring} AND client_type IN (${client_type:sqlstring}) AND model IN (${model:sqlstring}) GROUP BY model ORDER BY 2 DESC"
         }
       ],
       "options": {
@@ -187,12 +197,12 @@
         {
           "refId": "credits",
           "format": 1,
-          "rawSQL": "SELECT date_parse(date, '%Y-%m-%d') AS time, sum(credits_used) AS credits FROM usage_daily WHERE $__dateFilter(date) AND user_email = ${user_email:sqlstring} AND client_type IN (${client_type:sqlstring}) GROUP BY date ORDER BY 1"
+          "rawSQL": "SELECT CAST(date AS timestamp) AS time, sum(credits_used) AS credits FROM usage_daily WHERE $__dateFilter(date) AND user_email = ${user_email:sqlstring} AND client_type IN (${client_type:sqlstring}) GROUP BY date ORDER BY 1"
         },
         {
           "refId": "messages",
           "format": 1,
-          "rawSQL": "SELECT date_parse(date, '%Y-%m-%d') AS time, sum(total_messages) AS messages FROM usage_daily WHERE $__dateFilter(date) AND user_email = ${user_email:sqlstring} AND client_type IN (${client_type:sqlstring}) GROUP BY date ORDER BY 1"
+          "rawSQL": "SELECT CAST(date AS timestamp) AS time, sum(total_messages) AS messages FROM usage_daily WHERE $__dateFilter(date) AND user_email = ${user_email:sqlstring} AND client_type IN (${client_type:sqlstring}) GROUP BY date ORDER BY 1"
         }
       ],
       "options": {
@@ -220,7 +230,7 @@
         {
           "refId": "A",
           "format": 0,
-          "rawSQL": "SELECT sum(credits_used) AS mtd_credits, max(overage_cap) AS cap, cast(sum(credits_used) / max(overage_cap) * 100 AS decimal(5,1)) AS utilisation_pct FROM usage_daily WHERE date >= date_format(date_trunc('month', current_date), '%Y-%m-%d') AND user_email = ${user_email:sqlstring} AND client_type IN (${client_type:sqlstring})"
+          "rawSQL": "SELECT sum(credits_used) AS mtd_credits, max(overage_cap) AS cap, cast(sum(credits_used) / max(overage_cap) * 100 AS decimal(5,1)) AS utilisation_pct FROM usage_daily WHERE date >= CAST(date_trunc('month', current_date) AS date) AND user_email = ${user_email:sqlstring} AND client_type IN (${client_type:sqlstring})"
         }
       ],
       "options": {
