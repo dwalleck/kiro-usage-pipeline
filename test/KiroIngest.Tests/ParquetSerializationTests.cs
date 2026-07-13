@@ -6,21 +6,21 @@ namespace KiroIngest.Tests;
 public class ParquetSerializationTests
 {
     [Test]
-    public async Task UsageDaily_parquet_schema_matches_glue_columns()
+    public async Task SerializeAsync_UsageDailyRecord_ProducesCorrectSchema()
     {
         var record = new UsageDailyRecord
         {
-            user_id = "u",
-            user_email = "e",
-            chat_conversations = 8,
-            credits_used = 114.45787414391377,
-            overage_cap = 2500.0,
-            overage_credits_used = 0.0,
-            overage_enabled = false,
-            subscription_tier = "PRO_MAX",
-            total_messages = 131,
-            new_user = false,
-            profile_id = "arn",
+            UserId = "u",
+            UserEmail = "e",
+            ChatConversations = 8,
+            CreditsUsed = 114.45787414391377,
+            OverageCap = 2500.0,
+            OverageCreditsUsed = 0.0,
+            OverageEnabled = false,
+            SubscriptionTier = "PRO_MAX",
+            TotalMessages = 131,
+            NewUser = false,
+            ProfileId = "arn",
         };
 
         var (names, types) = await SchemaOf([record]);
@@ -45,9 +45,9 @@ public class ParquetSerializationTests
     }
 
     [Test]
-    public async Task ModelMessages_parquet_schema_matches_glue_columns()
+    public async Task SerializeAsync_ModelMessageRecord_ProducesCorrectSchema()
     {
-        var record = new ModelMessageRecord { user_id = "u", user_email = "e", model = "auto", messages = 4 };
+        var record = new ModelMessageRecord { UserId = "u", UserEmail = "e", Model = "auto", Messages = 4 };
 
         var (names, types) = await SchemaOf([record]);
 

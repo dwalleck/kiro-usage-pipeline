@@ -6,8 +6,6 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <IsPackable>false</IsPackable>
-    <!-- TUnit runs on Microsoft.Testing.Platform; enable `dotnet test` support. -->
-    <TestingPlatformDotnetTestSupport>true</TestingPlatformDotnetTestSupport>
   </PropertyGroup>
 
   <ItemGroup>
@@ -15,6 +13,7 @@
   </ItemGroup>
 
   <ItemGroup>
+    <PackageReference Include="Moq" Version="4.20.72" />
     <PackageReference Include="TUnit" Version="1.58.0" />
   </ItemGroup>
 

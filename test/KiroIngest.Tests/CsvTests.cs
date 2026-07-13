@@ -5,7 +5,7 @@ namespace KiroIngest.Tests;
 public class CsvTests
 {
     [Test]
-    public async Task Parses_header_and_rows()
+    public async Task Parse_StandardCsv_ReturnsHeaderAndRows()
     {
         var (header, rows) = Csv.Parse("a,b,c\n1,2,3\n4,5,6");
 
@@ -15,7 +15,7 @@ public class CsvTests
     }
 
     [Test]
-    public async Task Strips_surrounding_double_quotes()
+    public async Task Parse_QuotedField_StripsQuotes()
     {
         var (_, rows) = Csv.Parse("email\n\"dwalleck@proton.me\"");
 
@@ -23,7 +23,7 @@ public class CsvTests
     }
 
     [Test]
-    public async Task Preserves_commas_inside_quoted_fields()
+    public async Task Parse_EmbeddedCommas_PreservesContent()
     {
         var (_, rows) = Csv.Parse("a,b\n\"has,comma\",tail");
 
@@ -32,7 +32,7 @@ public class CsvTests
     }
 
     [Test]
-    public async Task Handles_doubled_quote_escapes()
+    public async Task Parse_EscapedQuotes_UnescapesToSingleQuote()
     {
         var (_, rows) = Csv.Parse("a\n\"she said \"\"hi\"\"\"");
 
@@ -40,7 +40,16 @@ public class CsvTests
     }
 
     [Test]
-    public async Task Skips_blank_lines()
+    public async Task Parse_EmptyInput_ReturnsEmptyHeaderAndRows()
+    {
+        var (header, rows) = Csv.Parse("");
+
+        await Assert.That(header).IsEmpty();
+        await Assert.That(rows).IsEmpty();
+    }
+
+    [Test]
+    public async Task Parse_BlankLines_Skips()
     {
         var (_, rows) = Csv.Parse("a,b\n1,2\n\n3,4\n");
 

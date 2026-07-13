@@ -75,17 +75,17 @@ public static partial class ReportTransform
 
             partition.UsageDaily.Add(new UsageDailyRecord
             {
-                user_id = userId,
-                user_email = email,
-                chat_conversations = ParseLong(Field(row, index, ColChatConversations)),
-                credits_used = ParseDouble(Field(row, index, ColCreditsUsed)),
-                overage_cap = ParseDouble(Field(row, index, ColOverageCap)),
-                overage_credits_used = ParseDouble(Field(row, index, ColOverageCreditsUsed)),
-                overage_enabled = ParseBool(Field(row, index, ColOverageEnabled)),
-                subscription_tier = Field(row, index, ColSubscriptionTier),
-                total_messages = ParseLong(Field(row, index, ColTotalMessages)),
-                new_user = ParseBool(Field(row, index, ColNewUser)),
-                profile_id = Field(row, index, ColProfileId),
+                UserId = userId,
+                UserEmail = email,
+                ChatConversations = ParseLong(Field(row, index, ColChatConversations)),
+                CreditsUsed = ParseDouble(Field(row, index, ColCreditsUsed)),
+                OverageCap = ParseDouble(Field(row, index, ColOverageCap)),
+                OverageCreditsUsed = ParseDouble(Field(row, index, ColOverageCreditsUsed)),
+                OverageEnabled = ParseBool(Field(row, index, ColOverageEnabled)),
+                SubscriptionTier = Field(row, index, ColSubscriptionTier),
+                TotalMessages = ParseLong(Field(row, index, ColTotalMessages)),
+                NewUser = ParseBool(Field(row, index, ColNewUser)),
+                ProfileId = Field(row, index, ColProfileId),
             });
 
             // Unpivot the dynamic model columns; drop zero (and defensively negative) counts.
@@ -104,10 +104,10 @@ public static partial class ReportTransform
 
                 partition.ModelMessages.Add(new ModelMessageRecord
                 {
-                    user_id = userId,
-                    user_email = email,
-                    model = model,
-                    messages = messages,
+                    UserId = userId,
+                    UserEmail = email,
+                    Model = model,
+                    Messages = messages,
                 });
             }
         }

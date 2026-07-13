@@ -1,34 +1,33 @@
+using System.Text.Json.Serialization;
+
 namespace KiroIngest;
 
-// Parquet DTOs. The property names ARE the Parquet column names, so they are
-// lowercase snake_case to match the Glue table columns exactly (ticket 09).
-// `date` and `client_type` are path partitions and are deliberately NOT here.
-#pragma warning disable IDE1006 // intentional snake_case to match Parquet/Glue column names
-
+// Parquet DTOs. Property names are PascalCase (C# convention) and mapped to
+// snake_case Parquet column names via [JsonPropertyName] to match Glue
+// table columns exactly (ticket 09). `date` and `client_type` are path
+// partitions and are deliberately NOT here.
 public sealed class UsageDailyRecord
 {
-    public string user_id { get; set; } = "";
-    public string user_email { get; set; } = "";
-    public long chat_conversations { get; set; }
-    public double credits_used { get; set; }
-    public double overage_cap { get; set; }
-    public double overage_credits_used { get; set; }
-    public bool overage_enabled { get; set; }
-    public string subscription_tier { get; set; } = "";
-    public long total_messages { get; set; }
-    public bool new_user { get; set; }
-    public string profile_id { get; set; } = "";
+    [JsonPropertyName("user_id")]              public string UserId { get; set; } = "";
+    [JsonPropertyName("user_email")]           public string UserEmail { get; set; } = "";
+    [JsonPropertyName("chat_conversations")]   public long ChatConversations { get; set; }
+    [JsonPropertyName("credits_used")]         public double CreditsUsed { get; set; }
+    [JsonPropertyName("overage_cap")]          public double OverageCap { get; set; }
+    [JsonPropertyName("overage_credits_used")] public double OverageCreditsUsed { get; set; }
+    [JsonPropertyName("overage_enabled")]      public bool OverageEnabled { get; set; }
+    [JsonPropertyName("subscription_tier")]    public string SubscriptionTier { get; set; } = "";
+    [JsonPropertyName("total_messages")]       public long TotalMessages { get; set; }
+    [JsonPropertyName("new_user")]             public bool NewUser { get; set; }
+    [JsonPropertyName("profile_id")]           public string ProfileId { get; set; } = "";
 }
 
 public sealed class ModelMessageRecord
 {
-    public string user_id { get; set; } = "";
-    public string user_email { get; set; } = "";
-    public string model { get; set; } = "";
-    public long messages { get; set; }
+    [JsonPropertyName("user_id")]  public string UserId { get; set; } = "";
+    [JsonPropertyName("user_email")] public string UserEmail { get; set; } = "";
+    [JsonPropertyName("model")]    public string Model { get; set; } = "";
+    [JsonPropertyName("messages")] public long Messages { get; set; }
 }
-
-#pragma warning restore IDE1006
 
 // The two facts for one (date, client_type) partition, ready to write as Parquet.
 public sealed class FactPartition

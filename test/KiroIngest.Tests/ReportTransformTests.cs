@@ -25,7 +25,7 @@ public class ReportTransformTests
         "2026-07-10,\"215bb5b0-00a1-70cd-1caf-57794fdc8915\",KIRO_IDE,2,0.7132330391376451,2500.0,0.0,false,\"arn:aws:codewhisperer:us-east-1:369434902231:profile/UV4C4VUDDGRU\",PRO_MAX,4,false,\"dwalleck@proton.me\",4";
 
     [Test]
-    public async Task KiroCli_row_maps_usage_daily_fields()
+    public async Task Transform_KiroCliCsv_MapsAllUsageDailyFields()
     {
         var partitions = ReportTransform.Transform(KiroCliCsv, Targets(TargetEmail));
 
@@ -36,44 +36,44 @@ public class ReportTransformTests
         await Assert.That(p.UsageDaily.Count).IsEqualTo(1);
 
         var u = p.UsageDaily[0];
-        await Assert.That(u.user_id).IsEqualTo("215bb5b0-00a1-70cd-1caf-57794fdc8915");
-        await Assert.That(u.user_email).IsEqualTo(TargetEmail);
-        await Assert.That(u.chat_conversations).IsEqualTo(8L);
-        await Assert.That(u.credits_used).IsEqualTo(114.45787414391377).Within(1e-9);
-        await Assert.That(u.overage_cap).IsEqualTo(2500.0).Within(1e-9);
-        await Assert.That(u.overage_credits_used).IsEqualTo(0.0).Within(1e-9);
-        await Assert.That(u.overage_enabled).IsFalse();
-        await Assert.That(u.subscription_tier).IsEqualTo("PRO_MAX");
-        await Assert.That(u.total_messages).IsEqualTo(131L);
-        await Assert.That(u.new_user).IsFalse();
-        await Assert.That(u.profile_id).IsEqualTo("arn:aws:codewhisperer:us-east-1:369434902231:profile/UV4C4VUDDGRU");
+        await Assert.That(u.UserId).IsEqualTo("215bb5b0-00a1-70cd-1caf-57794fdc8915");
+        await Assert.That(u.UserEmail).IsEqualTo(TargetEmail);
+        await Assert.That(u.ChatConversations).IsEqualTo(8L);
+        await Assert.That(u.CreditsUsed).IsEqualTo(114.45787414391377).Within(1e-9);
+        await Assert.That(u.OverageCap).IsEqualTo(2500.0).Within(1e-9);
+        await Assert.That(u.OverageCreditsUsed).IsEqualTo(0.0).Within(1e-9);
+        await Assert.That(u.OverageEnabled).IsFalse();
+        await Assert.That(u.SubscriptionTier).IsEqualTo("PRO_MAX");
+        await Assert.That(u.TotalMessages).IsEqualTo(131L);
+        await Assert.That(u.NewUser).IsFalse();
+        await Assert.That(u.ProfileId).IsEqualTo("arn:aws:codewhisperer:us-east-1:369434902231:profile/UV4C4VUDDGRU");
     }
 
     [Test]
-    public async Task KiroCli_row_unpivots_models_preserving_dots()
+    public async Task Transform_KiroCliCsv_UnpivotsModelsPreservingDots()
     {
         var p = ReportTransform.Transform(KiroCliCsv, Targets(TargetEmail))[0];
 
         await Assert.That(p.ModelMessages.Count).IsEqualTo(2);
-        await Assert.That(p.ModelMessages.Single(m => m.model == "claude_haiku_4.5").messages).IsEqualTo(8L);
-        await Assert.That(p.ModelMessages.Single(m => m.model == "claude_opus_4.8").messages).IsEqualTo(123L);
+        await Assert.That(p.ModelMessages.Single(m => m.Model == "claude_haiku_4.5").Messages).IsEqualTo(8L);
+        await Assert.That(p.ModelMessages.Single(m => m.Model == "claude_opus_4.8").Messages).IsEqualTo(123L);
         // Total_Messages must NOT be treated as a model column.
-        await Assert.That(p.ModelMessages.Any(m => m.model.Contains("total", StringComparison.OrdinalIgnoreCase))).IsFalse();
+        await Assert.That(p.ModelMessages.Any(m => m.Model.Contains("total", StringComparison.OrdinalIgnoreCase))).IsFalse();
     }
 
     [Test]
-    public async Task Auto_messages_becomes_ordinary_auto_model_row()
+    public async Task Transform_KiroIdeCsv_MapsAutoMessagesToAutoModel()
     {
         var p = ReportTransform.Transform(KiroIdeCsv, Targets(TargetEmail))[0];
 
         await Assert.That(p.ClientType).IsEqualTo("KIRO_IDE");
         await Assert.That(p.ModelMessages.Count).IsEqualTo(1);
-        await Assert.That(p.ModelMessages[0].model).IsEqualTo("auto");
-        await Assert.That(p.ModelMessages[0].messages).IsEqualTo(4L);
+        await Assert.That(p.ModelMessages[0].Model).IsEqualTo("auto");
+        await Assert.That(p.ModelMessages[0].Messages).IsEqualTo(4L);
     }
 
     [Test]
-    public async Task User_absent_from_target_list_is_dropped_fail_closed()
+    public async Task Transform_UserNotInTargetList_ReturnsEmpty()
     {
         var partitions = ReportTransform.Transform(KiroCliCsv, Targets("someone.else@example.com"));
 
@@ -81,7 +81,71 @@ public class ReportTransformTests
     }
 
     [Test]
-    public async Task Zero_count_model_cells_are_dropped()
+    public async Task Transform_OverageEnabledTrue_ParsesTrue()
+    {
+        var csv =
+            StaticHeader + ",auto_messages\n" +
+            "2026-07-01,\"u1\",KIRO_CLI,1,1.0,2500.0,0.0,true,\"arn\",PRO_MAX,5,false,\"dwalleck@proton.me\",5";
+
+        var p = ReportTransform.Transform(csv, Targets(TargetEmail))[0];
+
+        await Assert.That(p.UsageDaily[0].OverageEnabled).IsTrue();
+    }
+
+    [Test]
+    public async Task Transform_MissingNumericColumn_DefaultsToZero()
+    {
+        // Header omits Credits_Used and Chat_Conversations; Field returns "" → Parse* returns 0.
+        var csv =
+            "Date,UserId,Client_Type,Overage_Cap,User_Email,auto_messages\n" +
+            "2026-07-01,u1,KIRO_CLI,2500.0,dwalleck@proton.me,5";
+
+        var p = ReportTransform.Transform(csv, Targets(TargetEmail))[0];
+
+        await Assert.That(p.UsageDaily[0].CreditsUsed).IsEqualTo(0d);
+        await Assert.That(p.UsageDaily[0].ChatConversations).IsEqualTo(0L);
+    }
+
+    [Test]
+    public async Task Transform_RowTruncatedBeforeModelColumns_ProducesNoModelRows()
+    {
+        var csv =
+            StaticHeader + ",auto_messages\n" +
+            "2026-07-01,\"u1\",KIRO_CLI,1,1.0,2500.0,0.0,false,\"arn\",PRO_MAX,5,false,\"dwalleck@proton.me";
+
+        var p = ReportTransform.Transform(csv, Targets(TargetEmail))[0];
+
+        await Assert.That(p.UsageDaily.Count).IsEqualTo(1);
+        await Assert.That(p.ModelMessages).IsEmpty();
+    }
+
+    [Test]
+    public async Task Transform_NegativeModelMessages_DropsRow()
+    {
+        var csv =
+            StaticHeader + ",auto_messages,claude_opus_4.8_messages\n" +
+            "2026-07-01,\"u1\",KIRO_CLI,1,1.0,2500.0,0.0,false,\"arn\",PRO_MAX,5,false,\"dwalleck@proton.me\",5,-1";
+
+        var p = ReportTransform.Transform(csv, Targets(TargetEmail))[0];
+
+        await Assert.That(p.ModelMessages.Count).IsEqualTo(1);
+        await Assert.That(p.ModelMessages[0].Model).IsEqualTo("auto");
+    }
+
+    [Test]
+    public async Task Transform_MissingDateColumn_UsesEmptyPartitionKey()
+    {
+        var csv =
+            "UserId,Client_Type,User_Email,auto_messages\n" +
+            "u1,KIRO_CLI,dwalleck@proton.me,5";
+
+        var p = ReportTransform.Transform(csv, Targets(TargetEmail))[0];
+
+        await Assert.That(p.Date).IsEqualTo("");
+    }
+
+    [Test]
+    public async Task Transform_ZeroMessageModelCell_DropsRow()
     {
         var csv =
             StaticHeader + ",auto_messages,glm_5_messages\n" +
@@ -90,12 +154,12 @@ public class ReportTransformTests
         var p = ReportTransform.Transform(csv, Targets(TargetEmail))[0];
 
         await Assert.That(p.ModelMessages.Count).IsEqualTo(1);
-        await Assert.That(p.ModelMessages[0].model).IsEqualTo("glm_5");
-        await Assert.That(p.ModelMessages[0].messages).IsEqualTo(5L);
+        await Assert.That(p.ModelMessages[0].Model).IsEqualTo("glm_5");
+        await Assert.That(p.ModelMessages[0].Messages).IsEqualTo(5L);
     }
 
     [Test]
-    public async Task Multiple_rows_same_partition_group_together()
+    public async Task Transform_MultipleRowsSamePartition_GroupsTogether()
     {
         var csv =
             StaticHeader + ",auto_messages\n" +
@@ -113,13 +177,14 @@ public class ReportTransformTests
     [Arguments("user-activity-reports/AWSLogs/369434902231/KiroLogs/user_report/us-east-1/2026/07/10/00/KIRO_CLI_369434902231_user_report_202607100000.csv",
         "KIRO_CLI_369434902231_user_report_202607100000")]
     [Arguments("KIRO_IDE_1_user_report_1.csv", "KIRO_IDE_1_user_report_1")]
-    public async Task BaseName_strips_path_and_csv_extension(string key, string expected)
+    [Arguments("UPPERCASE.CSV", "UPPERCASE")]
+    public async Task BaseName_MultipleKeys_StripsPathAndExtension(string key, string expected)
     {
         await Assert.That(ReportTransform.BaseName(key)).IsEqualTo(expected);
     }
 
     [Test]
-    public async Task OutputKey_places_basename_under_partition_path()
+    public async Task OutputKey_StandardInput_PlacesUnderPartition()
     {
         var key = ReportTransform.OutputKey(
             "usage_daily", "2026-07-10", "KIRO_CLI",
