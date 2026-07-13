@@ -1,0 +1,285 @@
+{
+  "title": "B · User Drilldown",
+  "tags": ["kiro", "usage", "drilldown"],
+  "timezone": "utc",
+  "editable": true,
+  "graphTooltip": 1,
+  "schemaVersion": 39,
+  "templating": {
+    "list": [
+      {
+        "name": "user_email",
+        "type": "query",
+        "multi": false,
+        "includeAll": false,
+        "label": "User Email",
+        "datasource": { "type": "grafana-athena-datasource", "uid": "${DS_ATHENA}" },
+        "definition": "SELECT DISTINCT user_email FROM usage_daily ORDER BY 1",
+        "refresh": 1,
+        "sort": 1
+      },
+      {
+        "name": "client_type",
+        "type": "custom",
+        "multi": true,
+        "includeAll": true,
+        "label": "Client Type",
+        "current": { "text": "All", "value": "$__all" },
+        "options": [
+          { "text": "KIRO_CLI", "value": "KIRO_CLI", "selected": true },
+          { "text": "KIRO_IDE", "value": "KIRO_IDE", "selected": true },
+          { "text": "PLUGIN", "value": "PLUGIN", "selected": true }
+        ]
+      },
+      {
+        "name": "model",
+        "type": "query",
+        "multi": true,
+        "includeAll": true,
+        "label": "Model",
+        "datasource": { "type": "grafana-athena-datasource", "uid": "${DS_ATHENA}" },
+        "definition": "SELECT DISTINCT model FROM model_messages ORDER BY 1",
+        "refresh": 1,
+        "sort": 1
+      }
+    ]
+  },
+  "panels": [
+    {
+      "id": 1,
+      "title": "User KPIs",
+      "type": "row",
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 0 },
+      "collapsed": false
+    },
+    {
+      "id": 2,
+      "title": "Total Credits",
+      "type": "stat",
+      "gridPos": { "h": 4, "w": 6, "x": 0, "y": 1 },
+      "datasource": { "type": "grafana-athena-datasource", "uid": "${DS_ATHENA}" },
+      "targets": [
+        {
+          "refId": "A",
+          "format": 0,
+          "rawSQL": "SELECT sum(credits_used) AS total_credits FROM usage_daily WHERE $__dateFilter(date) AND user_email = ${user_email:sqlstring} AND client_type IN (${client_type:sqlstring})"
+        }
+      ],
+      "options": { "graphMode": "none", "colorMode": "value", "textMode": "auto" },
+      "fieldConfig": {
+        "defaults": { "color": { "mode": "thresholds" }, "thresholds": { "steps": [{ "color": "blue", "value": null }] }, "unit": "short", "decimals": 1 },
+        "overrides": []
+      }
+    },
+    {
+      "id": 3,
+      "title": "Total Messages",
+      "type": "stat",
+      "gridPos": { "h": 4, "w": 6, "x": 6, "y": 1 },
+      "datasource": { "type": "grafana-athena-datasource", "uid": "${DS_ATHENA}" },
+      "targets": [
+        {
+          "refId": "A",
+          "format": 0,
+          "rawSQL": "SELECT sum(total_messages) AS total_messages FROM usage_daily WHERE $__dateFilter(date) AND user_email = ${user_email:sqlstring} AND client_type IN (${client_type:sqlstring})"
+        }
+      ],
+      "options": { "graphMode": "none", "colorMode": "value", "textMode": "auto" },
+      "fieldConfig": {
+        "defaults": { "color": { "mode": "thresholds" }, "thresholds": { "steps": [{ "color": "purple", "value": null }] }, "unit": "short" },
+        "overrides": []
+      }
+    },
+    {
+      "id": 4,
+      "title": "Subscription Tier",
+      "type": "stat",
+      "gridPos": { "h": 4, "w": 6, "x": 12, "y": 1 },
+      "datasource": { "type": "grafana-athena-datasource", "uid": "${DS_ATHENA}" },
+      "targets": [
+        {
+          "refId": "A",
+          "format": 0,
+          "rawSQL": "SELECT max(subscription_tier) AS tier FROM usage_daily WHERE $__dateFilter(date) AND user_email = ${user_email:sqlstring} AND client_type IN (${client_type:sqlstring})"
+        }
+      ],
+      "options": { "graphMode": "none", "colorMode": "value", "textMode": "auto" },
+      "fieldConfig": {
+        "defaults": { "color": { "mode": "thresholds" }, "thresholds": { "steps": [{ "color": "green", "value": null }] } },
+        "overrides": []
+      }
+    },
+    {
+      "id": 5,
+      "title": "Distinct Models Used",
+      "type": "stat",
+      "gridPos": { "h": 4, "w": 6, "x": 18, "y": 1 },
+      "datasource": { "type": "grafana-athena-datasource", "uid": "${DS_ATHENA}" },
+      "targets": [
+        {
+          "refId": "A",
+          "format": 0,
+          "rawSQL": "SELECT count(distinct model) AS model_count FROM model_messages WHERE $__dateFilter(date) AND user_email = ${user_email:sqlstring} AND client_type IN (${client_type:sqlstring})"
+        }
+      ],
+      "options": { "graphMode": "none", "colorMode": "value", "textMode": "auto" },
+      "fieldConfig": {
+        "defaults": { "color": { "mode": "thresholds" }, "thresholds": { "steps": [{ "color": "orange", "value": null }] }, "unit": "short" },
+        "overrides": []
+      }
+    },
+    {
+      "id": 6,
+      "title": "Messages per Day by Model",
+      "type": "timeseries",
+      "gridPos": { "h": 10, "w": 24, "x": 0, "y": 5 },
+      "datasource": { "type": "grafana-athena-datasource", "uid": "${DS_ATHENA}" },
+      "targets": [
+        {
+          "refId": "A",
+          "format": 1,
+          "rawSQL": "SELECT date_parse(date, '%Y-%m-%d') AS time, model, sum(messages) AS messages FROM model_messages WHERE $__dateFilter(date) AND user_email = ${user_email:sqlstring} AND client_type IN (${client_type:sqlstring}) GROUP BY date, model ORDER BY 1, 3 DESC"
+        }
+      ],
+      "options": {
+        "legend": { "displayMode": "table", "placement": "bottom", "showLegend": true },
+        "tooltip": { "mode": "multi", "sort": "desc" },
+        "stacking": { "mode": "normal", "group": "A" }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "custom": { "lineInterpolation": "smooth", "showPoints": "auto", "fillOpacity": 20, "stacking": { "mode": "normal", "group": "A" } }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 7,
+      "title": "Model Share",
+      "type": "piechart",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 15 },
+      "datasource": { "type": "grafana-athena-datasource", "uid": "${DS_ATHENA}" },
+      "targets": [
+        {
+          "refId": "A",
+          "format": 0,
+          "rawSQL": "SELECT model, sum(messages) AS messages FROM model_messages WHERE $__dateFilter(date) AND user_email = ${user_email:sqlstring} AND client_type IN (${client_type:sqlstring}) GROUP BY model ORDER BY 2 DESC"
+        }
+      ],
+      "options": {
+        "pieType": "donut",
+        "displayLabels": ["name", "percent"],
+        "legend": { "displayMode": "table", "placement": "right" }
+      },
+      "fieldConfig": {
+        "defaults": { "color": { "mode": "palette-classic" }, "unit": "short" },
+        "overrides": []
+      }
+    },
+    {
+      "id": 8,
+      "title": "Credits vs Messages",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 15 },
+      "datasource": { "type": "grafana-athena-datasource", "uid": "${DS_ATHENA}" },
+      "targets": [
+        {
+          "refId": "credits",
+          "format": 1,
+          "rawSQL": "SELECT date_parse(date, '%Y-%m-%d') AS time, sum(credits_used) AS credits FROM usage_daily WHERE $__dateFilter(date) AND user_email = ${user_email:sqlstring} AND client_type IN (${client_type:sqlstring}) GROUP BY date ORDER BY 1"
+        },
+        {
+          "refId": "messages",
+          "format": 1,
+          "rawSQL": "SELECT date_parse(date, '%Y-%m-%d') AS time, sum(total_messages) AS messages FROM usage_daily WHERE $__dateFilter(date) AND user_email = ${user_email:sqlstring} AND client_type IN (${client_type:sqlstring}) GROUP BY date ORDER BY 1"
+        }
+      ],
+      "options": {
+        "legend": { "displayMode": "list", "placement": "bottom" },
+        "tooltip": { "mode": "multi", "sort": "desc" }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "custom": { "lineInterpolation": "smooth", "showPoints": "auto", "fillOpacity": 5 }
+        },
+        "overrides": [
+          { "matcher": { "id": "byName", "options": "credits" }, "properties": [{ "id": "custom.axisPlacement", "value": "left" }] },
+          { "matcher": { "id": "byName", "options": "messages" }, "properties": [{ "id": "custom.axisPlacement", "value": "right" }] }
+        ]
+      }
+    },
+    {
+      "id": 9,
+      "title": "Monthly Cap Gauge",
+      "type": "gauge",
+      "gridPos": { "h": 8, "w": 8, "x": 0, "y": 23 },
+      "datasource": { "type": "grafana-athena-datasource", "uid": "${DS_ATHENA}" },
+      "targets": [
+        {
+          "refId": "A",
+          "format": 0,
+          "rawSQL": "SELECT sum(credits_used) AS mtd_credits, max(overage_cap) AS cap, cast(sum(credits_used) / max(overage_cap) * 100 AS decimal(5,1)) AS utilisation_pct FROM usage_daily WHERE date >= date_format(date_trunc('month', current_date), '%Y-%m-%d') AND user_email = ${user_email:sqlstring} AND client_type IN (${client_type:sqlstring})"
+        }
+      ],
+      "options": {
+        "showThresholdLabels": true,
+        "showThresholdMarkers": true,
+        "minVizWidth": 0,
+        "minVizHeight": 0
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "min": 0,
+          "max": 100,
+          "color": { "mode": "thresholds" },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "orange", "value": 70 },
+              { "color": "red", "value": 90 }
+            ]
+          }
+        },
+        "overrides": [
+          { "matcher": { "id": "byName", "options": "mtd_credits" }, "properties": [{ "id": "unit", "value": "short" }, { "id": "displayName", "value": "Credits Used (MTD)" }] },
+          { "matcher": { "id": "byName", "options": "cap" }, "properties": [{ "id": "unit", "value": "short" }, { "id": "displayName", "value": "Cap" }] }
+        ]
+      }
+    },
+    {
+      "id": 10,
+      "title": "Daily Detail",
+      "type": "table",
+      "gridPos": { "h": 8, "w": 16, "x": 8, "y": 23 },
+      "datasource": { "type": "grafana-athena-datasource", "uid": "${DS_ATHENA}" },
+      "targets": [
+        {
+          "refId": "A",
+          "format": 0,
+          "rawSQL": "SELECT date, client_type, credits_used, overage_credits_used, total_messages, chat_conversations, overage_enabled, new_user FROM usage_daily WHERE $__dateFilter(date) AND user_email = ${user_email:sqlstring} AND client_type IN (${client_type:sqlstring}) ORDER BY date DESC, client_type"
+        }
+      ],
+      "options": {
+        "showHeader": true,
+        "sortBy": [{ "displayName": "date", "desc": true }]
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": { "cellOptions": { "type": "auto" }, "inspect": false }
+        },
+        "overrides": [
+          { "matcher": { "id": "byName", "options": "credits_used" }, "properties": [{ "id": "decimals", "value": 1 }] },
+          { "matcher": { "id": "byName", "options": "overage_credits_used" }, "properties": [{ "id": "decimals", "value": 1 }] }
+        ]
+      }
+    }
+  ],
+  "__requires": [
+    { "type": "grafana", "id": "grafana", "version": "10.4.0" },
+    { "type": "datasource", "id": "grafana-athena-datasource", "version": "1.0.0" }
+  ]
+}

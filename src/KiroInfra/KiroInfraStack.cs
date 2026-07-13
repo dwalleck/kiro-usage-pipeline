@@ -79,11 +79,16 @@ namespace KiroInfra
 
             // Query layer: Glue database + the two projected fact tables and the
             // kiro-usage Athena workgroup, all reading the analytics bucket.
-            new QueryLayer(this, "QueryLayer", analyticsBucket);
+            var queryLayer = new QueryLayer(this, "QueryLayer", analyticsBucket);
 
             // Ingest pipeline: the S3-triggered .NET 10 Lambda that transforms raw
             // User Activity Reports into curated Parquet on the analytics bucket.
             var ingest = new IngestPipeline(this, "IngestPipeline", rawBucket, analyticsBucket, targetList);
+
+            // Managed Grafana workspace + Athena data-source IAM role. IAM Identity
+            // Center auth (instance exists in us-east-2; Managed Grafana auto-discovers
+            // it across regions). Dashboards are exported as JSON for manual import.
+            var grafana = new GrafanaWorkspace(this, "GrafanaWorkspace", analyticsBucket, QueryLayer.WorkGroupName);
 
             new CfnOutput(this, "IngestLambdaName", new CfnOutputProps
             {
@@ -119,6 +124,18 @@ namespace KiroInfra
             {
                 Value = QueryLayer.WorkGroupName,
                 Description = "Athena workgroup for Kiro usage queries",
+            });
+
+            new CfnOutput(this, "GrafanaWorkspaceUrl", new CfnOutputProps
+            {
+                Value = $"https://{grafana.Workspace.AttrEndpoint}",
+                Description = "Managed Grafana workspace URL — sign in with IAM Identity Center",
+            });
+
+            new CfnOutput(this, "GrafanaDataSourceRoleArn", new CfnOutputProps
+            {
+                Value = grafana.DataSourceRole.RoleArn,
+                Description = "Grafana data-source IAM role ARN (Athena + Glue + S3)",
             });
         }
 
