@@ -5,13 +5,16 @@ using Amazon.Lambda.S3Events;
 namespace KiroIngest;
 
 // Polymorphic handler: dispatches on event shape.
-//   S3 ObjectCreated notification → live path (process one key)
-//   {"mode":"backfill", "from":?, "to":?}  → backfill path (list-and-process loop)
-// Both converge on ProcessCsv so the transform + Target-List filter are identical.
-// Single-pass JSON parse: JsonDocument reads the stream once, then typed
-// deserialization reuses the in-memory DOM — no buffering, no rewinding.
+//   S3 ObjectCreated notification → live path (process each key)
+//   {"mode":"backfill", "from":?, "to":?} → backfill path
+// Both converge on ProcessCsv so the transform + Target List filter are identical.
 public sealed class Function
 {
+    private static readonly JsonSerializerOptions EventJsonOptions = new()
+    {
+        PropertyNameCaseInsensitive = true,
+    };
+
     private readonly IIngestService _ingest;
 
     public Function()
@@ -21,36 +24,105 @@ public sealed class Function
 
     public Function(IIngestService ingest)
     {
-        _ingest = ingest;
+        _ingest = ingest ?? throw new ArgumentNullException(nameof(ingest));
     }
 
     public async Task HandleAsync(Stream input, ILambdaContext context)
     {
-        using var doc = await JsonDocument.ParseAsync(input);
+        try
+        {
+            using var doc = await JsonDocument.ParseAsync(input);
+            if (doc.RootElement.ValueKind != JsonValueKind.Object)
+            {
+                throw new InvalidOperationException("Lambda payload must be a JSON object");
+            }
 
-        if (doc.RootElement.TryGetProperty("mode", out var modeProp) &&
-            modeProp.GetString() == "backfill")
-        {
-            var backfill = JsonSerializer.Deserialize<BackfillRequest>(doc.RootElement)
-                ?? throw new InvalidOperationException("Failed to parse backfill payload from JSON");
-            await _ingest.ProcessBackfillAsync(backfill.From, backfill.To, context);
-        }
-        else
-        {
-            var s3Event = JsonSerializer.Deserialize<S3Event>(doc.RootElement)
+            if (doc.RootElement.TryGetProperty("mode", out var modeProperty))
+            {
+                await HandleModeRequestAsync(doc.RootElement, modeProperty, context);
+                return;
+            }
+
+            if (!doc.RootElement.TryGetProperty("Records", out var recordsProperty) ||
+                recordsProperty.ValueKind != JsonValueKind.Array ||
+                recordsProperty.GetArrayLength() == 0)
+            {
+                throw new InvalidOperationException("Unsupported Lambda payload: expected a non-empty S3 Records array or mode=backfill");
+            }
+
+            var s3Event = JsonSerializer.Deserialize<S3Event>(doc.RootElement, EventJsonOptions)
                 ?? throw new InvalidOperationException("Failed to parse S3 event from JSON");
             await HandleS3EventAsync(s3Event, context);
         }
+        catch (Exception ex)
+        {
+            context.Logger.LogError(JsonSerializer.Serialize(new
+            {
+                @event = "invocation_error",
+                error = ex.Message,
+                details = ex.ToString(),
+                type = ex.GetType().Name,
+            }));
+            throw;
+        }
     }
 
-    private async Task HandleS3EventAsync(S3Event evnt, ILambdaContext context)
+    private async Task HandleModeRequestAsync(
+        JsonElement root,
+        JsonElement modeProperty,
+        ILambdaContext context)
     {
-        foreach (var record in evnt.Records ?? [])
+        if (modeProperty.ValueKind != JsonValueKind.String)
         {
-            var bucket = record.S3.Bucket.Name;
-            // S3 event keys are URL-encoded (e.g. '+' for spaces).
-            var key = System.Net.WebUtility.UrlDecode(record.S3.Object.Key);
-            await _ingest.ProcessCsv(bucket, key, context);
+            throw new InvalidOperationException($"Unsupported Lambda mode; expected '{BackfillRequest.ModeValue}'");
+        }
+
+        var backfill = JsonSerializer.Deserialize<BackfillRequest>(root, EventJsonOptions)
+            ?? throw new InvalidOperationException("Failed to parse backfill payload from JSON");
+        backfill.Validate();
+
+        await _ingest.ProcessBackfillAsync(
+            backfill.From,
+            backfill.To,
+            context,
+            backfill.ContinuationToken);
+    }
+
+    private async Task HandleS3EventAsync(S3Event s3Event, ILambdaContext context)
+    {
+        var failures = new List<Exception>();
+
+        foreach (var record in s3Event.Records ?? [])
+        {
+            try
+            {
+                var s3 = record.S3;
+                var objectEntity = s3?.Object;
+                var bucket = s3?.Bucket?.Name;
+                if (s3 is null ||
+                    objectEntity is null ||
+                    string.IsNullOrWhiteSpace(bucket) ||
+                    string.IsNullOrWhiteSpace(objectEntity.Key))
+                {
+                    throw new InvalidOperationException("S3 event record is missing bucket or object key");
+                }
+
+                var source = new IngestSource(
+                    bucket,
+                    objectEntity.KeyDecoded,
+                    objectEntity.VersionId,
+                    objectEntity.Sequencer);
+                await _ingest.ProcessCsv(source, context);
+            }
+            catch (Exception ex)
+            {
+                failures.Add(ex);
+            }
+        }
+
+        if (failures.Count > 0)
+        {
+            throw new AggregateException("One or more S3 event records failed", failures);
         }
     }
 }

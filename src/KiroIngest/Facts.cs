@@ -23,18 +23,51 @@ public sealed class UsageDailyRecord
 
 public sealed class ModelMessageRecord
 {
-    [JsonPropertyName("user_id")]  public string UserId { get; set; } = "";
+    [JsonPropertyName("user_id")]    public string UserId { get; set; } = "";
     [JsonPropertyName("user_email")] public string UserEmail { get; set; } = "";
-    [JsonPropertyName("model")]    public string Model { get; set; } = "";
-    [JsonPropertyName("messages")] public long Messages { get; set; }
+    [JsonPropertyName("model")]      public string Model { get; set; } = "";
+    [JsonPropertyName("messages")]   public long Messages { get; set; }
 }
 
-// Lightweight DTO for the structured log source field, serialized as a nested
-// object in the ingest_complete and ingest_error log lines.
-public sealed class S3Source
+// Immutable source identity passed from the Lambda event boundary into the
+// ingest core. VersionId binds reads to the notified S3 object version;
+// Sequencer supports persistent stale-event rejection.
+public sealed record IngestSource
 {
-    public string Bucket { get; set; } = "";
-    public string Key { get; set; } = "";
+    public IngestSource(
+        string bucket,
+        string key,
+        string? versionId = null,
+        string? sequencer = null,
+        DateOnly? expectedDate = null)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(bucket);
+        ArgumentException.ThrowIfNullOrWhiteSpace(key);
+        if (sequencer is not null)
+        {
+            if (string.IsNullOrWhiteSpace(sequencer) || !sequencer.All(Uri.IsHexDigit))
+            {
+                throw new ArgumentException("S3 event sequencer must be a non-empty hexadecimal string", nameof(sequencer));
+            }
+
+            if (expectedDate is not null)
+            {
+                throw new ArgumentException("Live sequencer and backfill expected date are mutually exclusive");
+            }
+        }
+
+        Bucket = bucket;
+        Key = key;
+        VersionId = versionId;
+        Sequencer = sequencer;
+        ExpectedDate = expectedDate;
+    }
+
+    public string Bucket { get; }
+    public string Key { get; }
+    public string? VersionId { get; }
+    public string? Sequencer { get; }
+    public DateOnly? ExpectedDate { get; }
 }
 
 // Result of the CSV-to-facts transform, carrying row-count metadata so the

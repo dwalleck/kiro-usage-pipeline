@@ -4,18 +4,14 @@ using CsvHelper.Configuration;
 
 namespace KiroIngest;
 
-// Thin seam over CsvHelper's low-level parser. Returning (header, rows) keeps the
-// transform decoupled from the CSV library (and easy to unit-test) while delegating
-// quoting, escaped quotes, and embedded newlines to a battle-tested reader.
+// Thin seam over CsvHelper's low-level parser. Dynamic model columns vary
+// between files, but every row within one file must match that file's header.
 public static class Csv
 {
     private static readonly CsvConfiguration Config = new(CultureInfo.InvariantCulture)
     {
-        // The dynamic <model>_messages columns mean row width varies file to file,
-        // so don't enforce a constant field count.
-        BadDataFound = null,
         IgnoreBlankLines = true,
-        DetectColumnCountChanges = false,
+        DetectColumnCountChanges = true,
     };
 
     public static (string[] Header, List<string[]> Rows) Parse(string text)
@@ -26,22 +22,37 @@ public static class Csv
         string[]? header = null;
         var rows = new List<string[]>();
 
-        while (parser.Read())
+        try
         {
-            var record = parser.Record;
-            if (record is null)
+            while (parser.Read())
             {
-                continue;
-            }
+                var record = parser.Record;
+                if (record is null)
+                {
+                    continue;
+                }
 
-            if (header is null)
-            {
-                header = record;
+                if (header is null)
+                {
+                    header = record;
+                }
+                else
+                {
+                    if (record.Length != header.Length)
+                    {
+                        throw new InvalidDataException(
+                            $"User Activity Report row has {record.Length} columns; expected {header.Length}");
+                    }
+
+                    rows.Add(record);
+                }
             }
-            else
-            {
-                rows.Add(record);
-            }
+        }
+        catch (CsvHelperException ex)
+        {
+            throw new InvalidDataException(
+                $"Malformed User Activity Report CSV: {ex.Message}",
+                ex);
         }
 
         return (header ?? [], rows);

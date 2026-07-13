@@ -26,7 +26,6 @@ Resolve:
 Deliverable: the frozen schema definitions ready to drop into the CDK Glue table definitions
 and the Lambda transform.
 
-
 ## Answer
 
 Frozen against the real data ([findings](../assets/01-data-inspection-findings.md)) and the
@@ -40,19 +39,21 @@ Parquet.Net spike ([findings](../assets/02-parquet-net-findings.md)).
   stored in the Parquet body. (Keeping `date` out of the body also sidesteps the Parquet.Net
   INT96 timestamp gotcha.)
 - Physical layout:
+
   ```
   s3://<target-bucket>/usage_daily/date=YYYY-MM-DD/client_type=KIRO_CLI/<key>.parquet
   s3://<target-bucket>/model_messages/date=YYYY-MM-DD/client_type=KIRO_CLI/<key>.parquet
   ```
-- **Deterministic output key** = source CSV basename with `.parquet` extension, e.g.
-  `.../client_type=KIRO_CLI/KIRO_CLI_369434902231_user_report_202607100000.parquet`. A re-fire
-  overwrites the same object (idempotent).
+
+- **Deterministic output key** = source CSV basename plus a short SHA-256 source-identity
+  suffix, e.g. `.../KIRO_CLI_..._202607100000-<hash>.parquet`. The full bucket/key hash avoids
+  same-basename collisions; a re-fire overwrites the same object.
 - Compression: **Snappy** (Athena's Parquet default).
 
 ### `usage_daily` — body columns (grain: date, user_id, client_type)
 
 | Column | Parquet/Glue type |
-|---|---|
+| --- | --- |
 | `user_id` | string |
 | `user_email` | string |
 | `chat_conversations` | bigint (long) |
@@ -74,7 +75,7 @@ and future-proofs multi-profile).
 ### `model_messages` — body columns (grain: date, user_id, client_type, model)
 
 | Column | Parquet/Glue type |
-|---|---|
+| --- | --- |
 | `user_id` | string |
 | `user_email` | string |
 | `model` | string |
@@ -83,6 +84,7 @@ and future-proofs multi-profile).
 Partition keys (path, not body): `date` (date), `client_type` (string).
 
 Unpivot rules:
+
 - `model` = source column name minus the `_messages` suffix, **verbatim lowercase** (dots
   preserved): `claude_opus_4.8_messages` → `claude_opus_4.8`, `glm_5_messages` → `glm_5`.
 - `auto_messages` → `model = "auto"`, an ordinary row (not special-cased; Auto is not a

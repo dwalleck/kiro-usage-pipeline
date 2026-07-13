@@ -37,6 +37,18 @@ while [[ $# -gt 0 ]]; do
 	esac
 done
 
+for value in "$FROM" "$TO"; do
+	if [ -n "$value" ] && [[ ! "$value" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]]; then
+		echo "ERROR: Dates must use ISO YYYY-MM-DD format: $value"
+		exit 1
+	fi
+done
+
+if [ -n "$FROM" ] && [ -n "$TO" ] && [[ "$FROM" > "$TO" ]]; then
+	echo "ERROR: --from must be on or before --to"
+	exit 1
+fi
+
 # Resolve the Lambda function name from the CloudFormation stack output.
 STACK_NAME="KiroInfra"
 FN_NAME=$(aws cloudformation describe-stacks \
@@ -67,17 +79,19 @@ echo "Profile:   $PROFILE"
 echo "From:      ${FROM:-unbounded}"
 echo "To:        ${TO:-unbounded}"
 echo "Payload:   $PAYLOAD"
-echo "Output:    $OUTPUT_FILE"
 echo ""
 
+# Invoke asynchronously so Lambda retries and the configured DLQ apply to
+# backfill failures exactly as they do to live S3 notifications.
 aws lambda invoke \
 	--profile "$PROFILE" \
 	--region "$REGION" \
 	--function-name "$FN_NAME" \
+	--invocation-type Event \
+	--cli-binary-format raw-in-base64-out \
 	--payload "$PAYLOAD" \
 	"$OUTPUT_FILE"
 
 echo ""
-echo "=== Result ==="
-cat "$OUTPUT_FILE"
+echo "Backfill accepted for asynchronous processing. Monitor CloudWatch and the ingest DLQ."
 echo ""

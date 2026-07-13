@@ -1,3 +1,4 @@
+using Amazon.Lambda;
 using Amazon.S3;
 using Amazon.SimpleSystemsManagement;
 
@@ -11,6 +12,7 @@ public static class IngestServiceFactory
     public const string TargetListParameterEnv = "TARGET_LIST_PARAMETER";
     public const string RawBucketEnv = "RAW_BUCKET";
     public const string RawPrefixEnv = "RAW_PREFIX";
+    public const string FunctionNameEnv = "AWS_LAMBDA_FUNCTION_NAME";
 
     public static IngestService FromEnvironment()
     {
@@ -18,17 +20,26 @@ public static class IngestServiceFactory
         var targetListParameter = Require(TargetListParameterEnv);
         var rawBucket = Require(RawBucketEnv);
         var rawPrefix = Require(RawPrefixEnv);
+        var functionName = Require(FunctionNameEnv);
 
         return new IngestService(
             new AmazonS3Client(),
             new AmazonSimpleSystemsManagementClient(),
+            new LambdaBackfillContinuationScheduler(new AmazonLambdaClient(), functionName),
             analyticsBucket,
             targetListParameter,
             rawBucket,
             rawPrefix);
     }
 
-    private static string Require(string name) =>
-        Environment.GetEnvironmentVariable(name)
-            ?? throw new InvalidOperationException($"Missing required environment variable: {name}");
+    private static string Require(string name)
+    {
+        var value = Environment.GetEnvironmentVariable(name);
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            throw new InvalidOperationException($"Missing required environment variable: {name}");
+        }
+
+        return value;
+    }
 }

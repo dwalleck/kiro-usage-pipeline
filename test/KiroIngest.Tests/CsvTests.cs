@@ -55,4 +55,18 @@ public class CsvTests
 
         await Assert.That(rows.Count).IsEqualTo(2);
     }
+
+    [Test]
+    public async Task Parse_RowWidthDiffersFromHeader_Throws()
+    {
+        await Assert.That(() => Csv.Parse("a,b,c\n1,2"))
+            .Throws<InvalidDataException>();
+    }
+
+    [Test]
+    public async Task Parse_BadQuotedData_Throws()
+    {
+        await Assert.That(() => Csv.Parse("a,b\n\"value\"junk,tail"))
+            .Throws<InvalidDataException>();
+    }
 }

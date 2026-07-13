@@ -24,8 +24,9 @@ real report into the raw bucket automatically produces two Parquet objects under
 - [x] Write `usage_daily` + `model_messages` as Snappy Parquet with `date`/`client_type` as
       **path partitions only** (not in the body); credits/overage as `double`, signed
       ints/longs, date not written as INT96, one row group per file.
-- [x] **Deterministic output key** = source CSV basename with `.parquet` extension, so a
-      re-fire overwrites the same object (idempotent).
+- [x] **Deterministic output key** = source CSV basename plus a short SHA-256 suffix of the
+      full source bucket/key. Re-fires overwrite the same object, while distinct source paths
+      cannot collide; reprocessing deletes obsolete outputs.
 - [x] Lambda execution role scoped per the spec: `GetObject` + prefix-scoped `ListBucket` on
       the raw bucket; `PutObject` limited to `usage_daily/*` + `model_messages/*` on the
       analytics bucket; `ssm:GetParameter` on the Target List param; scoped Logs. No KMS, no

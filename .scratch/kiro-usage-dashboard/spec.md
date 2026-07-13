@@ -19,6 +19,7 @@ List** of **User Emails**, **Unpivots** the dynamic model columns, and lands que
 Grafana** dashboard.
 
 **In scope (v1):**
+
 - **User Activity Report** only, entirely within account `369434902231`, region `us-east-1`.
 - Two analytics facts: **Daily Usage Fact** (`usage_daily`) and **Model Message Fact**
   (`model_messages`).
@@ -26,6 +27,7 @@ Grafana** dashboard.
 - Athena over partition-projected Glue tables; two Managed Grafana dashboards.
 
 **Out of scope (v1):**
+
 - **Legacy Analytic Report** (`by_user_analytic/`) — no `User_Email`, no client type, needs a
   User Id→email bridge. Deferred.
 - **Prompt Log** ingestion — content keyed by Prefixed User Id, no email.
@@ -118,24 +120,28 @@ tables + partition projection (date + client_type) → Athena → Managed Grafan
 ## 5. Frozen fact schemas (ticket 03)
 
 **Conventions (both tables):**
+
 - Column names are lowercase `snake_case`; the Lambda maps source CSV names → fact names once.
 - **`date` and `client_type` are partition keys only** (Hive-style path segments), **not**
   stored in the Parquet body. Keeping `date` out of the body also sidesteps the Parquet.Net
   INT96 gotcha.
 - Compression: **Snappy** (Parquet.Net default, Athena's Parquet default).
 - Physical layout:
+
   ```
   s3://<analytics-bucket>/usage_daily/date=YYYY-MM-DD/client_type=KIRO_CLI/<key>.parquet
   s3://<analytics-bucket>/model_messages/date=YYYY-MM-DD/client_type=KIRO_CLI/<key>.parquet
   ```
-- **Deterministic output key** = source CSV basename with `.parquet` extension, e.g.
-  `KIRO_CLI_369434902231_user_report_202607100000.parquet`. A re-fire (or backfill overlap)
-  overwrites the same object → idempotent, no duplicates, no Athena double-count.
+
+- **Deterministic output key** = source CSV basename plus a short SHA-256 source-identity
+  suffix, e.g. `KIRO_CLI_369434902231_user_report_202607100000-<hash>.parquet`. The hash uses
+  the full source bucket/key, preventing same-basename collisions. Reprocessing reconciles
+  obsolete outputs and overwrites the same current keys.
 
 ### `usage_daily` — Daily Usage Fact (grain: date, user_id, client_type)
 
 | Column | Type |
-|---|---|
+| --- | --- |
 | `user_id` | string |
 | `user_email` | string |
 | `chat_conversations` | bigint |
@@ -155,7 +161,7 @@ decimal/INT96 gotchas); `profile_id` retained (constant ARN, future-proofs multi
 ### `model_messages` — Model Message Fact (grain: date, user_id, client_type, model)
 
 | Column | Type |
-|---|---|
+| --- | --- |
 | `user_id` | string |
 | `user_email` | string |
 | `model` | string |
@@ -164,6 +170,7 @@ decimal/INT96 gotchas); `profile_id` retained (constant ARN, future-proofs multi
 Partition keys (path, not body): `date` (date), `client_type` (string).
 
 **Unpivot rules:**
+
 - `model` = source column name minus the `_messages` suffix, verbatim lowercase, dots
   preserved: `claude_opus_4.8_messages` → `claude_opus_4.8`, `glm_5_messages` → `glm_5`.
 - `auto_messages` → `model = "auto"`, an ordinary row (not special-cased).
@@ -193,22 +200,22 @@ per-object path, in a loop," not a separate program.
 1. **Mechanism:** on-demand Lambda invoke (not S3 Batch Ops / event re-emit / local script) —
    maximises code + environment fidelity.
 2. **Structure:** one polymorphic Lambda. The handler dispatches on event shape — an S3
-   `ObjectCreated` notification → process that one key; a `{"mode":"backfill", "from":?,
-   "to":?}` payload → list-and-process. Both branches converge on a single private
-   `ProcessCsv(bucket, key)` core.
-3. **Trigger:** a **manual CLI invoke** after `cdk deploy` (wrapped in a small script), e.g.
-   `aws lambda invoke --function-name <fn> --payload '{"mode":"backfill"}' out.json`.
-   Deliberately not a CDK custom resource — backfill is a one-time data op, not part of the
-   infra lifecycle.
+   `ObjectCreated` notification → process that object version; a `{"mode":"backfill",
+   "from":?, "to":?, "continuationToken":?}` payload → process one bounded S3 page. Both
+   branches converge on the same `ProcessCsv` core. Truncated pages schedule the next page as
+   a separate asynchronous invocation.
+3. **Trigger:** a **manual asynchronous CLI invoke** after `cdk deploy` (wrapped in a small
+   script), so Lambda retries and the DLQ apply. It remains outside the CDK lifecycle.
 4. **Idempotency:** identical deterministic-key overwrite path (§5). The key is a pure
-   function of source object identity (date + client_type + user), not wall-clock or run id,
-   so re-runs and live/backfill overlap converge harmlessly.
-5. **Concurrency:** single invoke, sequential `foreach` loop (28 tiny objects = milliseconds).
-   Set **reserved concurrency = 1** on the backfill path. S3-list paging + continuation-token
-   re-invoke is a documented never-triggered fallback should object count ever approach the
-   timeout.
+   function of full source bucket/key plus fact partition, not wall-clock or run id. Raw-bucket
+   versioning, S3 sequencer state, reserved concurrency, and stale-output reconciliation make
+   live/backfill overlap converge safely.
+5. **Concurrency:** reserved concurrency = 1. Each invocation processes one S3 listing page
+   sequentially; a truncated page self-invokes the next continuation asynchronously. Per-object
+   failures are isolated so later objects in the page are attempted, then aggregated so the page
+   still receives retries and DLQ handling.
 6. **Selection scope:** full-prefix scan under `user_report/`, filtered to the `.csv` suffix
-   (naturally skips the stray markers). The Target-List email filter stays **inside**
+   (naturally skips the stray markers). The Target List email filter stays **inside**
    `ProcessCsv` so live and backfill filter identically. Payload `from`/`to` are optional,
    default unbounded — allows reprocessing a single day after a transform fix without a code
    change.
@@ -220,6 +227,7 @@ per-object path, in a loop," not a separate program.
 All statements are single-region (`us-east-1`), single-account (`369434902231`).
 
 ### 7.1 Bucket topology
+
 - **Raw bucket** (source): CDK-managed via the existing `CreateKiroBucket` pattern; Kiro
   writes via the `q.amazonaws.com` `KiroWrite` resource policy. Data migrates off the
   pre-existing `kiro-monitoring-activity-report-369434902231` bucket and Kiro is re-pointed at
@@ -228,6 +236,7 @@ All statements are single-region (`us-east-1`), single-account (`369434902231`).
   Athena results under `athena-results/`.
 
 ### 7.2 Encryption
+
 - **SSE-S3 default** on both buckets (`UseCustomKey=false`) → zero KMS statements anywhere.
 - Design stays **CMK-ready**: the analytics bucket honors the same `UseCustomKey` toggle as
   the raw bucket. The additive KMS grants (Lambda: `kms:Decrypt` for read + `kms:GenerateDataKey`,
@@ -235,6 +244,7 @@ All statements are single-region (`us-east-1`), single-account (`369434902231`).
   are documented so flipping it on is purely additive.
 
 ### 7.3 Lambda execution role (trust `lambda.amazonaws.com`)
+
 ```
 # Read raw User Activity Reports
 Allow s3:GetObject
@@ -256,24 +266,28 @@ Allow ssm:GetParameter
 Allow logs:CreateLogGroup, logs:CreateLogStream, logs:PutLogEvents
   on arn:aws:logs:us-east-1:369434902231:log-group:/aws/lambda/<fn-name>:*
 ```
+
 - **No KMS** (SSE-S3). **No Glue/Athena** on the Lambda — partition projection means it never
-  registers partitions; it just writes to the projected paths. The prefix-scoped `ListBucket`
-  + `GetObject` also cover backfill enumeration (one role, one code path).
-- CDK sugar: `rawBucket.grantRead(fn, ".../user_report/*")`,
-  `analyticsBucket.grantWrite(fn, "usage_daily/*")` + `"model_messages/*"` (keep scoped, not
-  bucket-wide), `targetListParam.grantRead(fn)`.
+  registers partitions. Prefix-scoped `ListBucket` and version-aware `GetObject` cover raw
+  reads and backfill. Curated prefixes require read/write/delete plus scoped listing for
+  reconciliation; `ingest-state/*` stores the latest S3 sequencer per source. The role can
+  invoke only itself to schedule the next asynchronous backfill page and retains
+  `ssm:GetParameter` on the Target List.
 
 ### 7.4 Trigger wiring
+
 ```
 rawBucket.addEventNotification(
   EventType.OBJECT_CREATED,
   new LambdaDestination(fn),
   { prefix: "<prefix>/AWSLogs/369434902231/KiroLogs/user_report/", suffix: ".csv" });
 ```
+
 CDK auto-adds the `s3.amazonaws.com` invoke permission scoped to the raw bucket ARN +
 `aws:SourceAccount`. Same-region (both us-east-1), so the notification constraint is satisfied.
 
 ### 7.5 Athena workgroup `kiro-usage`
+
 - `ResultConfiguration.OutputLocation = s3://<analytics-bucket>/athena-results/`,
   `EnforceWorkGroupConfiguration=true`, a modest `BytesScannedCutoffPerQuery` cap,
   `PublishCloudWatchMetricsEnabled=true`.
@@ -282,7 +296,9 @@ CDK auto-adds the `s3.amazonaws.com` invoke permission scoped to the raw bucket 
   permission set — no new IAM.
 
 ### 7.6 Managed Grafana → Athena data-source role (trust `grafana.amazonaws.com`)
+
 Attach **`AmazonGrafanaAthenaAccess`** + a scoped inline policy:
+
 ```
 Allow athena:StartQueryExecution, athena:StopQueryExecution,
       athena:GetQueryExecution, athena:GetQueryResults, athena:GetWorkGroup
@@ -298,6 +314,7 @@ Allow s3:ListBucket
 Allow s3:GetObject, s3:PutObject
   on arn:aws:s3:::<analytics-bucket>/athena-results/*
 ```
+
 - **Human auth: IAM Identity Center** (already in use; workspace Admin assigned). Okta later =
   the SAML path (Grafana→Okta directly, or Okta→Identity Center upstream) — choosing Identity
   Center now keeps that door open.
@@ -313,8 +330,9 @@ One Managed Grafana workspace (auth IAM Identity Center), one folder **`Kiro Usa
 Mock: [assets/06-grafana-dashboard-mock.html](assets/06-grafana-dashboard-mock.html).
 
 ### Template variables
+
 | Variable | Type | Source |
-|---|---|---|
+| --- | --- | --- |
 | `$user_email` | query, multi | `SELECT DISTINCT user_email FROM usage_daily ORDER BY 1` |
 | `$client_type` | custom enum, multi | `KIRO_CLI,KIRO_IDE,PLUGIN` (enum avoids a scan) |
 | `$model` | query, multi | `SELECT DISTINCT model FROM model_messages ORDER BY 1` |
@@ -325,6 +343,7 @@ client_type IN ($client_type)`; parse the string `date` partition with
 `date_parse(date,'%Y-%m-%d')` for time axes.
 
 ### Dashboard A · Fleet Overview (aggregates across all selected users)
+
 1. **Fleet KPI row** (`usage_daily`) — active users `count(distinct user_email)`; fleet
    credits MTD `sum(credits_used)`; fleet messages `sum(total_messages)` (+ conversations);
    users near cap (count with utilisation ≥ 0.9).
@@ -332,6 +351,7 @@ client_type IN ($client_type)`; parse the string `date` partition with
 3. **Messages by user** (bar, `usage_daily`).
 4. **Cap proximity — leads with a "users over 90%" alert** (`usage_daily`, **month-to-date**,
    ignores dashboard time range):
+
    ```sql
    SELECT user_email,
           sum(credits_used) AS mtd_credits,
@@ -342,6 +362,7 @@ client_type IN ($client_type)`; parse the string `date` partition with
      AND user_email IN ($user_email)
    GROUP BY user_email
    ```
+
    Primary: table/alert-list filtered to `utilisation >= 0.9` desc (empty ⇒ green "no users
    over 90%"). Secondary: bar-gauge of all users, thresholds **green <70% / orange 70–90% /
    red >90%**.
@@ -351,11 +372,12 @@ client_type IN ($client_type)`; parse the string `date` partition with
 8. **Client type split** (pie/bar, `usage_daily`).
 
 ### Dashboard B · User Drilldown (`$user_email` constrained to one)
-9. **Messages/day stacked by model** (timeseries, `model_messages`).
-10. **Model share** (bar, `model_messages`).
-11. **Credits vs messages** (dual timeseries, `usage_daily`).
-12. **This user's cap gauge** (panel 4 scoped to one user).
-13. **Per-user/day detail** (table, `usage_daily` + top-model rollup).
+
+- **Panel 9 — Messages/day stacked by model** (timeseries, `model_messages`).
+- **Panel 10 — Model share** (bar, `model_messages`).
+- **Panel 11 — Credits vs messages** (dual timeseries, `usage_daily`).
+- **Panel 12 — This user's cap gauge** (panel 4 scoped to one user).
+- **Panel 13 — Per-user/day detail** (table, `usage_daily` + top-model rollup).
 
 **Cap-semantics caveat (implementer):** panels use `overage_cap` (2500 in real data) as the
 ceiling. If `PRO_MAX`'s true monthly included-credit allowance differs from `overage_cap`,
@@ -366,6 +388,7 @@ swap `max(overage_cap)` for the correct allowance.
 ## 9. Build/packaging & CDK stack changes
 
 ### 9.1 Lambda build & packaging (ticket 02)
+
 - **Parquet.Net v6.0.3** (pure-managed, zero native deps; .NET 10 is a first-class target).
 - **Package as a zip .NET 10 Lambda** on the **managed .NET 10 runtime** (`Code.fromAsset` /
   `dotnet lambda package`) — no container image needed. Simpler, faster cold start. (AWS Lambda
@@ -379,12 +402,14 @@ swap `max(overage_cap)` for the correct allowance.
   types explicitly (no crawler inference).
 
 ### 9.2 CDK stack changes
+
 **The entire existing CDK (`KiroInfraStack.cs`, `Program.cs`, the two sample buckets) is
 sample code and may be replaced wholesale** — the implementer is free to restructure the
 stack rather than extend it. The current `CreateKiroBucket` helper (SSE-S3/CMK toggle,
 BlockPublicAccess, EnforceSSL, RETAIN, `KiroWrite` resource policy) is worth keeping only as a
 **reference** for the Kiro-writable bucket shape; reuse or rewrite it as convenient. Whatever
 the structure, the POC stack must provide:
+
 - **Raw bucket** via `CreateKiroBucket` (re-point Kiro's User Activity Report S3 location at it).
 - **Analytics bucket** via the same pattern + a lifecycle rule expiring `athena-results/*`
   after ~7–14 days; no expiry on the curated table prefixes.
@@ -419,6 +444,7 @@ the structure, the POC stack must provide:
 ---
 
 ## Source tickets
+
 - 01 — data inspection · `issues/01-inspect-real-activity-report-data.md` (+ `assets/01-...md`)
 - 02 — Parquet.Net spike · `issues/02-parquet-net-lambda-spike.md` (+ `assets/02-...md`)
 - 03 — fact schemas · `issues/03-finalize-fact-schemas.md`

@@ -12,14 +12,15 @@ history (`2026-06-20 → 2026-07-10`) rather than only reports that arrive after
 - [x] The Lambda handler is **polymorphic**: it dispatches on event shape — an S3
       `ObjectCreated` notification → process that one key; a `{"mode":"backfill", "from":?,
       "to":?}` payload → list-and-process. Both branches converge on the same `ProcessCsv`.
-- [x] Backfill lists objects under the `user_report/` prefix, filtered to the `.csv` suffix
-      (skips stray markers), processing them in a single sequential loop.
+- [x] Backfill lists objects under the `user_report/` prefix, filtered to the `.csv` suffix.
+      Each asynchronous invocation handles one S3 page and self-invokes the next continuation;
+      object failures are isolated and aggregated after later objects are attempted.
 - [x] `from`/`to` bounds are optional and default to unbounded, allowing a single day to be
       reprocessed after a transform fix without a code change.
 - [x] Reserved concurrency of 1 on the backfill path (or reliance on it being a single manual
       invoke) so it cannot stampede.
-- [x] A small documented wrapper (script/CLI one-liner) fires the backfill, e.g.
-      `aws lambda invoke --function-name <fn> --payload '{"mode":"backfill"}' out.json`.
+- [x] A small documented wrapper invokes the backfill asynchronously (`--invocation-type
+      Event`) so Lambda retries and the DLQ cover backfill failures.
 - [x] Verifiable: one invoke processes all 28 historical objects; re-running produces
       byte-identical overwrites (no duplicates / no double-count when queried in Athena).
 
@@ -36,4 +37,5 @@ Implemented 2026-07-12:
 - `IngestPipeline.cs` — exposed `Function` property; added `RAW_BUCKET`/`RAW_PREFIX` env vars.
 - `KiroInfraStack.cs` — added `IngestLambdaName` stack output for backfill script.
 - `scripts/backfill.sh` — CLI wrapper: resolves Lambda name from stack output, builds payload with optional `--from`/`--to`, invokes backfill.
-- 48 tests pass (11 new backfill tests + updated factory/function tests).
+- Hardened in the observability follow-up: one page per async invocation, self-scheduled
+  continuations, object-failure isolation, strict range/key-date validation, and 78 passing tests.

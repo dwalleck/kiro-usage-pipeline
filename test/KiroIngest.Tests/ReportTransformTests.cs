@@ -95,55 +95,47 @@ public class ReportTransformTests
     }
 
     [Test]
-    public async Task Transform_MissingNumericColumn_DefaultsToZero()
+    public async Task Transform_MissingRequiredColumn_Throws()
     {
-        // Header omits Credits_Used and Chat_Conversations; Field returns "" → Parse* returns 0.
         var csv =
             "Date,UserId,Client_Type,Overage_Cap,User_Email,auto_messages\n" +
             "2026-07-01,u1,KIRO_CLI,2500.0,dwalleck@proton.me,5";
 
-        var p = ReportTransform.Transform(csv, Targets(TargetEmail)).Partitions[0];
-
-        await Assert.That(p.UsageDaily[0].CreditsUsed).IsEqualTo(0d);
-        await Assert.That(p.UsageDaily[0].ChatConversations).IsEqualTo(0L);
+        await Assert.That(() => ReportTransform.Transform(csv, Targets(TargetEmail)))
+            .Throws<InvalidDataException>();
     }
 
     [Test]
-    public async Task Transform_RowTruncatedBeforeModelColumns_ProducesNoModelRows()
+    public async Task Transform_TruncatedRow_Throws()
     {
         var csv =
             StaticHeader + ",auto_messages\n" +
             "2026-07-01,\"u1\",KIRO_CLI,1,1.0,2500.0,0.0,false,\"arn\",PRO_MAX,5,false,\"dwalleck@proton.me";
 
-        var p = ReportTransform.Transform(csv, Targets(TargetEmail)).Partitions[0];
-
-        await Assert.That(p.UsageDaily.Count).IsEqualTo(1);
-        await Assert.That(p.ModelMessages).IsEmpty();
+        await Assert.That(() => ReportTransform.Transform(csv, Targets(TargetEmail)))
+            .Throws<InvalidDataException>();
     }
 
     [Test]
-    public async Task Transform_NegativeModelMessages_DropsRow()
+    public async Task Transform_NegativeModelMessages_Throws()
     {
         var csv =
             StaticHeader + ",auto_messages,claude_opus_4.8_messages\n" +
             "2026-07-01,\"u1\",KIRO_CLI,1,1.0,2500.0,0.0,false,\"arn\",PRO_MAX,5,false,\"dwalleck@proton.me\",5,-1";
 
-        var p = ReportTransform.Transform(csv, Targets(TargetEmail)).Partitions[0];
-
-        await Assert.That(p.ModelMessages.Count).IsEqualTo(1);
-        await Assert.That(p.ModelMessages[0].Model).IsEqualTo("auto");
+        await Assert.That(() => ReportTransform.Transform(csv, Targets(TargetEmail)))
+            .Throws<InvalidDataException>();
     }
 
     [Test]
-    public async Task Transform_MissingDateColumn_UsesEmptyPartitionKey()
+    public async Task Transform_MissingDateColumn_Throws()
     {
         var csv =
             "UserId,Client_Type,User_Email,auto_messages\n" +
             "u1,KIRO_CLI,dwalleck@proton.me,5";
 
-        var p = ReportTransform.Transform(csv, Targets(TargetEmail)).Partitions[0];
-
-        await Assert.That(p.Date).IsEqualTo("");
+        await Assert.That(() => ReportTransform.Transform(csv, Targets(TargetEmail)))
+            .Throws<InvalidDataException>();
     }
 
     [Test]
@@ -161,18 +153,36 @@ public class ReportTransformTests
     }
 
     [Test]
-    public async Task Transform_MultipleRowsSamePartition_GroupsTogether()
+    public async Task Transform_DuplicateDailyUsageGrain_Throws()
     {
         var csv =
             StaticHeader + ",auto_messages\n" +
             "2026-07-01,\"u1\",KIRO_CLI,1,1.0,2500.0,0.0,false,\"arn\",PRO_MAX,5,false,\"dwalleck@proton.me\",5\n" +
             "2026-07-01,\"u1\",KIRO_CLI,2,2.0,2500.0,0.0,false,\"arn\",PRO_MAX,7,false,\"dwalleck@proton.me\",7";
 
-        var result = ReportTransform.Transform(csv, Targets(TargetEmail));
+        await Assert.That(() => ReportTransform.Transform(csv, Targets(TargetEmail)))
+            .Throws<InvalidDataException>();
+    }
 
-        await Assert.That(result.Partitions.Count).IsEqualTo(1);
-        await Assert.That(result.Partitions[0].UsageDaily.Count).IsEqualTo(2);
-        await Assert.That(result.Partitions[0].ModelMessages.Count).IsEqualTo(2);
+    [Test]
+    [Arguments("not-a-date", "KIRO_CLI", "1.0", "5")]
+    [Arguments("2026-07-01", "UNKNOWN", "1.0", "5")]
+    [Arguments("2026-07-01", "KIRO_CLI", "NaN", "5")]
+    [Arguments("2026-07-01", "KIRO_CLI", "Infinity", "5")]
+    [Arguments("2026-07-01", "KIRO_CLI", "-Infinity", "5")]
+    [Arguments("2026-07-01", "KIRO_CLI", "1.0", "-1")]
+    public async Task Transform_InvalidDomainValue_Throws(
+        string date,
+        string clientType,
+        string credits,
+        string totalMessages)
+    {
+        var csv =
+            StaticHeader + ",auto_messages\n" +
+            $"{date},\"u1\",{clientType},1,{credits},2500.0,0.0,false,\"arn\",PRO_MAX,{totalMessages},false,\"dwalleck@proton.me\",5";
+
+        await Assert.That(() => ReportTransform.Transform(csv, Targets(TargetEmail)))
+            .Throws<InvalidDataException>();
     }
 
     [Test]
@@ -186,13 +196,28 @@ public class ReportTransformTests
     }
 
     [Test]
-    public async Task OutputKey_StandardInput_PlacesUnderPartition()
+    public async Task OutputKey_StandardInput_PlacesUnderPartitionWithSourceIdentity()
     {
         var key = ReportTransform.OutputKey(
-            "usage_daily", "2026-07-10", "KIRO_CLI",
+            "usage_daily",
+            "2026-07-10",
+            "KIRO_CLI",
+            "raw-bucket",
             "x/y/KIRO_CLI_369434902231_user_report_202607100000.csv");
 
-        await Assert.That(key).IsEqualTo(
-            "usage_daily/date=2026-07-10/client_type=KIRO_CLI/KIRO_CLI_369434902231_user_report_202607100000.parquet");
+        await Assert.That(key)
+            .StartsWith("usage_daily/date=2026-07-10/client_type=KIRO_CLI/KIRO_CLI_369434902231_user_report_202607100000-")
+            .And.EndsWith(".parquet");
+    }
+
+    [Test]
+    public async Task OutputKey_SameBasenameDifferentSourcePaths_DoesNotCollide()
+    {
+        var first = ReportTransform.OutputKey(
+            "usage_daily", "2026-07-10", "KIRO_CLI", "raw-bucket", "a/report.csv");
+        var second = ReportTransform.OutputKey(
+            "usage_daily", "2026-07-10", "KIRO_CLI", "raw-bucket", "b/report.csv");
+
+        await Assert.That(first).IsNotEqualTo(second);
     }
 }

@@ -12,6 +12,7 @@ public class IngestServiceFactoryTests
         Environment.SetEnvironmentVariable(IngestServiceFactory.TargetListParameterEnv, null);
         Environment.SetEnvironmentVariable(IngestServiceFactory.RawBucketEnv, null);
         Environment.SetEnvironmentVariable(IngestServiceFactory.RawPrefixEnv, null);
+        Environment.SetEnvironmentVariable(IngestServiceFactory.FunctionNameEnv, null);
     }
 
     [Test]
@@ -60,6 +61,32 @@ public class IngestServiceFactoryTests
         await Assert.That(() => IngestServiceFactory.FromEnvironment())
             .Throws<InvalidOperationException>()
             .WithMessage("Missing required environment variable: RAW_PREFIX");
+    }
+
+    [Test]
+    public async Task FromEnvironment_MissingFunctionName_Throws()
+    {
+        Environment.SetEnvironmentVariable(IngestServiceFactory.AnalyticsBucketEnv, "analytics");
+        Environment.SetEnvironmentVariable(IngestServiceFactory.TargetListParameterEnv, "/param");
+        Environment.SetEnvironmentVariable(IngestServiceFactory.RawBucketEnv, "raw");
+        Environment.SetEnvironmentVariable(IngestServiceFactory.RawPrefixEnv, "pre/");
+
+        await Assert.That(() => IngestServiceFactory.FromEnvironment())
+            .Throws<InvalidOperationException>()
+            .WithMessage("Missing required environment variable: AWS_LAMBDA_FUNCTION_NAME");
+    }
+
+    [Test]
+    public async Task FromEnvironment_WhitespaceValue_Throws()
+    {
+        Environment.SetEnvironmentVariable(IngestServiceFactory.AnalyticsBucketEnv, "   ");
+        Environment.SetEnvironmentVariable(IngestServiceFactory.TargetListParameterEnv, "/param");
+        Environment.SetEnvironmentVariable(IngestServiceFactory.RawBucketEnv, "raw");
+        Environment.SetEnvironmentVariable(IngestServiceFactory.RawPrefixEnv, "pre/");
+
+        await Assert.That(() => IngestServiceFactory.FromEnvironment())
+            .Throws<InvalidOperationException>()
+            .WithMessage("Missing required environment variable: ANALYTICS_BUCKET");
     }
 
 }

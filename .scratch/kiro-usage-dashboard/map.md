@@ -48,15 +48,13 @@ stops at a hand-off-able spec (plus the grounding facts the spec needs).
   model, messages, drop zero rows); Snappy Parquet; deterministic overwrite keys; projection
   `date=2026-06-01,NOW` + `client_type` enum incl. PLUGIN.
 - [04 — Decide the one-time backfill mechanism](issues/04-backfill-mechanism.md)
-  — **On-demand invoke of the *live* Lambda**, not Batch Ops/event-replay/local script:
-  backfill = "the live per-object path, in a loop." **One polymorphic function** dispatches
-  on event shape (S3 `ObjectCreated` vs `{"mode":"backfill"}` payload) → shared
-  `ProcessCsv(bucket,key)` core. Triggered by a **manual CLI invoke** post-deploy (not a CDK
-  custom resource); **idempotent** via ticket-03 deterministic keys (source-identity-derived,
-  overwrite → safe re-runs, no dup/double-count). **Single sequential loop** (28 tiny objects;
-  reserved-concurrency 1; paging only as never-triggered fallback). Scope = full `user_report/`
-  scan filtered to `*.csv` (skips stray markers), Target-List filter stays *inside*
-  `ProcessCsv`; payload carries optional/default-unbounded `from`/`to` for one-day reprocess.
+  — **On-demand invoke of the live Lambda**, not Batch Ops/event replay/local script.
+  One polymorphic function dispatches S3 `ObjectCreated` and asynchronous `mode=backfill`
+  payloads into the shared `ProcessCsv` core. Each backfill invocation handles one S3 page,
+  asynchronously schedules the next continuation, and isolates object failures before
+  aggregating them for retry/DLQ handling. Reserved concurrency = 1. Scope remains the full
+  `user_report/` prefix filtered to `*.csv`; optional `from`/`to` bounds support targeted
+  reprocessing.
 - [05 — Design IAM & permissions for the pipeline](issues/05-iam-and-permissions-design.md)
   — **Collapse the whole POC into `us-east-1`** (co-located with source; reverses the
   us-east-2 note below). New CDK-managed buckets; **event-driven** S3→Lambda trigger
@@ -71,7 +69,7 @@ stops at a hand-off-able spec (plus the grounding facts the spec needs).
   — Verdict via `/prototype` (iterated): **two dashboards** in a `Kiro Usage` folder sharing
   variables + data source — **A · Fleet Overview** (fleet KPI row → **cap alert: users ≥90%**,
   full per-user bars secondary → credits/messages-by-user leaderboards + tier mix → fleet trend
-  + model/client splits, aggregating all users) and **B · User Drilldown** (pick one
+  plus model/client splits, aggregating all users) and **B · User Drilldown** (pick one
   `$user_email` → model-forward + detail table + that user's cap). Cap = MTD
   `sum(credits_used)` vs `overage_cap`, green/orange/red. Variables
   `$user_email`/`$client_type`(enum)/`$model` + `$__dateFilter(date)`. 13-panel catalog with

@@ -50,7 +50,11 @@ namespace KiroInfra
             }
 
             // Raw bucket: Kiro writes User Activity Report CSVs here via the KiroWrite policy.
-            var rawBucket = CreateProtectedBucket("KiroUsageRawBucket", "kiro-usage-raw", encryptionKey);
+            var rawBucket = CreateProtectedBucket(
+                "KiroUsageRawBucket",
+                "kiro-usage-raw",
+                encryptionKey,
+                versioned: true);
             AddKiroWritePolicy(rawBucket);
 
             // Analytics bucket: curated Parquet under usage_daily/ + model_messages/ and
@@ -165,7 +169,12 @@ namespace KiroInfra
 
         // Common protected-bucket shape: SSE-S3 (or CMK via the UseCustomKey toggle),
         // Block Public Access, EnforceSSL, and RETAIN on delete.
-        private Bucket CreateProtectedBucket(string id, string nameSuffix, Key encryptionKey, ILifecycleRule[] lifecycleRules = null)
+        private Bucket CreateProtectedBucket(
+            string id,
+            string nameSuffix,
+            Key encryptionKey,
+            ILifecycleRule[] lifecycleRules = null,
+            bool versioned = false)
         {
             return new Bucket(this, id, new BucketProps
             {
@@ -174,6 +183,7 @@ namespace KiroInfra
                 EncryptionKey = encryptionKey,
                 BlockPublicAccess = BlockPublicAccess.BLOCK_ALL,
                 EnforceSSL = true,
+                Versioned = versioned,
                 RemovalPolicy = RemovalPolicy.RETAIN,
                 LifecycleRules = lifecycleRules,
             });

@@ -1,3 +1,5 @@
+using System.Net;
+using System.Text;
 using Amazon.Lambda.Core;
 using Amazon.S3;
 using Amazon.S3.Model;
@@ -10,494 +12,500 @@ namespace KiroIngest.Tests;
 
 public class IngestServiceTests
 {
-    private const string TestBucket = "analytics-bucket";
-    private const string TargetParam = "/kiro-usage/target-list";
+    private const string AnalyticsBucket = "analytics-bucket";
+    private const string TargetParameter = "/kiro-usage/target-list";
     private const string TargetEmail = "dwalleck@proton.me";
-    private const string TestRawBucket = "raw-bucket";
-    private const string TestRawPrefix = "AWSLogs/369434902231/KiroLogs/user_report/";
+    private const string RawBucket = "raw-bucket";
+    private const string RawPrefix = "AWSLogs/369434902231/KiroLogs/user_report/";
 
-    // A minimal KIRO_CLI CSV row that exercises the full pipeline.
     private const string TestCsv =
         "Date,UserId,Client_Type,Chat_Conversations,Credits_Used,Overage_Cap,Overage_Credits_Used," +
         "Overage_Enabled,ProfileId,Subscription_Tier,Total_Messages,New_User,User_Email,auto_messages\n" +
         "2026-07-10,\"u1\",KIRO_CLI,3,10.5,2500,0,false,\"arn:...\",PRO_MAX,50,false,\"dwalleck@proton.me\",50";
 
-    private static IngestService CreateService(Mock<IAmazonS3> s3, Mock<IAmazonSimpleSystemsManagement> ssm) =>
-        new(s3.Object, ssm.Object, TestBucket, TargetParam, TestRawBucket, TestRawPrefix);
+    private static IngestService CreateService(
+        Mock<IAmazonS3> s3,
+        Mock<IAmazonSimpleSystemsManagement> ssm,
+        IBackfillContinuationScheduler? continuationScheduler = null) =>
+        new(
+            s3.Object,
+            ssm.Object,
+            continuationScheduler ?? Mock.Of<IBackfillContinuationScheduler>(),
+            AnalyticsBucket,
+            TargetParameter,
+            RawBucket,
+            RawPrefix);
 
-    private static Mock<IAmazonS3> CreateS3Mock(string csvContent)
+    private static Mock<IAmazonS3> CreateS3Mock(
+        Func<GetObjectRequest, string>? csvResolver = null,
+        string? savedSequencer = null)
     {
+        csvResolver ??= _ => TestCsv;
         var mock = new Mock<IAmazonS3>();
-        // Use factory lambda so each call gets a fresh (non-disposed) response stream.
-        mock.Setup(s => s.GetObjectAsync(
+
+        mock.Setup(client => client.GetObjectAsync(
                 It.IsAny<GetObjectRequest>(),
                 It.IsAny<CancellationToken>()))
-            .ReturnsAsync(() => new GetObjectResponse
+            .Returns((GetObjectRequest request, CancellationToken _) =>
             {
-                ResponseStream = new MemoryStream(System.Text.Encoding.UTF8.GetBytes(csvContent)),
+                if (request.BucketName == AnalyticsBucket && request.Key.StartsWith("ingest-state/", StringComparison.Ordinal))
+                {
+                    if (savedSequencer is null)
+                    {
+                        return Task.FromException<GetObjectResponse>(new AmazonS3Exception("not found")
+                        {
+                            StatusCode = HttpStatusCode.NotFound,
+                            ErrorCode = "NoSuchKey",
+                        });
+                    }
+
+                    return Task.FromResult(new GetObjectResponse
+                    {
+                        ResponseStream = new MemoryStream(Encoding.UTF8.GetBytes(
+                            $"{{\"Sequencer\":\"{savedSequencer}\"}}")),
+                    });
+                }
+
+                return Task.FromResult(new GetObjectResponse
+                {
+                    ResponseStream = new MemoryStream(Encoding.UTF8.GetBytes(csvResolver(request))),
+                });
             });
+
+        mock.Setup(client => client.ListObjectsV2Async(
+                It.IsAny<ListObjectsV2Request>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new ListObjectsV2Response
+            {
+                S3Objects = [],
+                IsTruncated = false,
+            });
+
+        mock.Setup(client => client.PutObjectAsync(
+                It.IsAny<PutObjectRequest>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new PutObjectResponse());
+        mock.Setup(client => client.DeleteObjectAsync(
+                It.IsAny<DeleteObjectRequest>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new DeleteObjectResponse());
+
         return mock;
     }
 
     private static Mock<IAmazonSimpleSystemsManagement> CreateSsmMock(string emails)
     {
         var mock = new Mock<IAmazonSimpleSystemsManagement>();
-        mock.Setup(s => s.GetParameterAsync(
+        mock.Setup(client => client.GetParameterAsync(
                 It.IsAny<GetParameterRequest>(),
                 It.IsAny<CancellationToken>()))
-            .ReturnsAsync(() => new GetParameterResponse
+            .ReturnsAsync(new GetParameterResponse
             {
                 Parameter = new Parameter { Value = emails },
             });
         return mock;
     }
 
-    [Test]
-    public async Task ProcessCsv_ValidCsv_WritesBothParquetFacts()
+    private static string BackfillKey(string date, string filename) =>
+        $"{RawPrefix}us-east-1/{date.Replace("-", "/")}/00/{filename}.csv";
+
+    private static string CsvForDate(string date) => TestCsv.Replace("2026-07-10", date, StringComparison.Ordinal);
+
+    private static string DateFromBackfillKey(string key)
     {
-        var s3 = CreateS3Mock(TestCsv);
-        var ssm = CreateSsmMock(TargetEmail);
-        var service = CreateService(s3, ssm);
-
-        await service.ProcessCsv("raw-bucket", "reports/KIRO_CLI_20260710.csv", null);
-
-        // Verify usage_daily was written.
-        s3.Verify(s => s.PutObjectAsync(
-            It.Is<PutObjectRequest>(r =>
-                r.BucketName == TestBucket &&
-                r.Key == "usage_daily/date=2026-07-10/client_type=KIRO_CLI/KIRO_CLI_20260710.parquet"),
-            It.IsAny<CancellationToken>()), Times.Once);
-
-        // Verify model_messages was written.
-        s3.Verify(s => s.PutObjectAsync(
-            It.Is<PutObjectRequest>(r =>
-                r.BucketName == TestBucket &&
-                r.Key == "model_messages/date=2026-07-10/client_type=KIRO_CLI/KIRO_CLI_20260710.parquet"),
-            It.IsAny<CancellationToken>()), Times.Once);
-
-        // Exactly two PutObject calls total (one per fact).
-        s3.Verify(s => s.PutObjectAsync(
-            It.IsAny<PutObjectRequest>(), It.IsAny<CancellationToken>()), Times.Exactly(2));
+        var parts = key.Split('/');
+        return $"{parts[^5]}-{parts[^4]}-{parts[^3]}";
     }
 
-    [Test]
-    public async Task ProcessCsv_TwoInvocations_CachesTargetListOnce()
-    {
-        var s3 = CreateS3Mock(TestCsv);
-        var ssm = CreateSsmMock(TargetEmail);
-        var service = CreateService(s3, ssm);
-
-        await service.ProcessCsv("raw-bucket", "a.csv", null);
-        await service.ProcessCsv("raw-bucket", "b.csv", null);
-
-        // SSM should be hit only once despite two ProcessCsv calls.
-        ssm.Verify(s => s.GetParameterAsync(
-            It.IsAny<GetParameterRequest>(),
-            It.IsAny<CancellationToken>()), Times.Once);
-    }
-
-    [Test]
-    public async Task ProcessCsv_NullContext_CompletesWithoutThrowing()
-    {
-        var s3 = CreateS3Mock(TestCsv);
-        var ssm = CreateSsmMock(TargetEmail);
-        var service = CreateService(s3, ssm);
-
-        await service.ProcessCsv("raw-bucket", "k.csv", null);
-
-        // Null context should not prevent parquet output — both facts still land.
-        s3.Verify(s => s.PutObjectAsync(
-            It.IsAny<PutObjectRequest>(), It.IsAny<CancellationToken>()), Times.Exactly(2));
-    }
-
-    [Test]
-    public async Task ProcessCsv_WithContext_LogsStructuredJson()
-    {
-        var s3 = CreateS3Mock(TestCsv);
-        var ssm = CreateSsmMock(TargetEmail);
-        var service = CreateService(s3, ssm);
-
-        var mockLogger = new Mock<ILambdaLogger>();
-        var context = new Mock<ILambdaContext>();
-        context.Setup(c => c.Logger).Returns(mockLogger.Object);
-
-        await service.ProcessCsv("raw-bucket", "k.csv", context.Object);
-
-        // The structured JSON log must include the required fields per ticket 13.
-        mockLogger.Verify(
-            l => l.LogInformation(It.Is<string>(s =>
-                s.Contains("\"event\":\"ingest_complete\"") &&
-                s.Contains("\"rows_read\":") &&
-                s.Contains("\"rows_kept\":") &&
-                s.Contains("\"usage_daily_rows\":") &&
-                s.Contains("\"model_messages_rows\":") &&
-                s.Contains("\"Bucket\":\"raw-bucket\"") &&
-                s.Contains("\"Key\":\"k.csv\""))),
-            Times.Once);
-    }
-
-    [Test]
-    public async Task ProcessCsv_HeaderOnlyCsv_WritesNoParquet()
-    {
-        var s3 = CreateS3Mock("Date,UserId,Client_Type\n");
-        var ssm = CreateSsmMock(TargetEmail);
-        var service = CreateService(s3, ssm);
-
-        await service.ProcessCsv("raw-bucket", "empty.csv", null);
-
-        s3.Verify(s => s.PutObjectAsync(
-            It.IsAny<PutObjectRequest>(), It.IsAny<CancellationToken>()), Times.Never);
-    }
-
-    // ── Backfill ───────────────────────────────────────────────────────
-
-    // Returns a mock S3 client that returns the given keys from ListObjectsV2
-    // and the test CSV content from GetObjectAsync.
     private static Mock<IAmazonS3> CreateBackfillS3Mock(string[] keys)
     {
-        var mock = CreateS3Mock(TestCsv);
-        mock.Setup(s => s.ListObjectsV2Async(
-                It.IsAny<ListObjectsV2Request>(),
+        var mock = CreateS3Mock(request => CsvForDate(DateFromBackfillKey(request.Key)));
+        mock.Setup(client => client.ListObjectsV2Async(
+                It.Is<ListObjectsV2Request>(request => request.BucketName == RawBucket),
                 It.IsAny<CancellationToken>()))
-            .ReturnsAsync(() => new ListObjectsV2Response
+            .ReturnsAsync(new ListObjectsV2Response
             {
-                S3Objects = [.. keys.Select(k => new S3Object { Key = k })],
+                S3Objects = [.. keys.Select(key => new S3Object { Key = key })],
                 IsTruncated = false,
             });
         return mock;
     }
 
-    private static string BackfillKey(string date, string filename) =>
-        $"{TestRawPrefix}us-east-1/{date.Replace("-", "/")}/00/{filename}.csv";
+    [Test]
+    public async Task ProcessCsv_ValidCsv_WritesBothFactsWithSourceIdentity()
+    {
+        var s3 = CreateS3Mock();
+        var service = CreateService(s3, CreateSsmMock(TargetEmail));
+
+        await service.ProcessCsv(RawBucket, "reports/KIRO_CLI_20260710.csv");
+
+        s3.Verify(client => client.PutObjectAsync(
+            It.Is<PutObjectRequest>(request =>
+                request.Key.StartsWith("usage_daily/date=2026-07-10/client_type=KIRO_CLI/KIRO_CLI_20260710-", StringComparison.Ordinal) &&
+                request.Key.EndsWith(".parquet", StringComparison.Ordinal)),
+            It.IsAny<CancellationToken>()), Times.Once);
+        s3.Verify(client => client.PutObjectAsync(
+            It.Is<PutObjectRequest>(request =>
+                request.Key.StartsWith("model_messages/date=2026-07-10/client_type=KIRO_CLI/KIRO_CLI_20260710-", StringComparison.Ordinal)),
+            It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Test]
+    public async Task ProcessCsv_TwoInvocations_RefreshesTargetListEachTime()
+    {
+        var s3 = CreateS3Mock();
+        var ssm = new Mock<IAmazonSimpleSystemsManagement>();
+        ssm.SetupSequence(client => client.GetParameterAsync(
+                It.IsAny<GetParameterRequest>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new GetParameterResponse { Parameter = new Parameter { Value = TargetEmail } })
+            .ReturnsAsync(new GetParameterResponse { Parameter = new Parameter { Value = "removed@example.com" } });
+        var service = CreateService(s3, ssm);
+
+        await service.ProcessCsv(RawBucket, "a.csv");
+        await service.ProcessCsv(RawBucket, "b.csv");
+
+        ssm.Verify(client => client.GetParameterAsync(
+            It.IsAny<GetParameterRequest>(),
+            It.IsAny<CancellationToken>()), Times.Exactly(2));
+    }
+
+    [Test]
+    public async Task ProcessCsv_NoLongerProducesRows_DeletesExistingOutputs()
+    {
+        var s3 = CreateS3Mock();
+        s3.Setup(client => client.ListObjectsV2Async(
+                It.Is<ListObjectsV2Request>(request => request.BucketName == AnalyticsBucket),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new ListObjectsV2Response
+            {
+                S3Objects =
+                [
+                    new S3Object { Key = "usage_daily/date=2026-07-10/client_type=KIRO_CLI/report.parquet" },
+                    new S3Object { Key = "model_messages/date=2026-07-10/client_type=KIRO_CLI/report.parquet" },
+                ],
+                IsTruncated = false,
+            });
+        var service = CreateService(s3, CreateSsmMock("someone-else@example.com"));
+
+        await service.ProcessCsv(RawBucket, "reports/report.csv");
+
+        s3.Verify(client => client.DeleteObjectAsync(
+            It.IsAny<DeleteObjectRequest>(),
+            It.IsAny<CancellationToken>()), Times.Exactly(2));
+        s3.Verify(client => client.PutObjectAsync(
+            It.IsAny<PutObjectRequest>(),
+            It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Test]
+    public async Task ProcessCsv_SecondFactWriteFails_RemovesAllSourceOutputs()
+    {
+        var s3 = CreateS3Mock();
+        s3.SetupSequence(client => client.PutObjectAsync(
+                It.IsAny<PutObjectRequest>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new PutObjectResponse())
+            .ThrowsAsync(new AmazonS3Exception("write failed"));
+        var service = CreateService(s3, CreateSsmMock(TargetEmail));
+
+        await Assert.That(() => service.ProcessCsv(RawBucket, "report.csv"))
+            .Throws<AmazonS3Exception>();
+
+        s3.Verify(client => client.DeleteObjectAsync(
+            It.IsAny<DeleteObjectRequest>(),
+            It.IsAny<CancellationToken>()), Times.Exactly(2));
+    }
+
+    [Test]
+    public async Task ProcessCsv_WriteFailsAfterExistingOutputsFound_FailsClosedByDeletingGeneration()
+    {
+        var s3 = CreateS3Mock();
+        s3.Setup(client => client.ListObjectsV2Async(
+                It.Is<ListObjectsV2Request>(request => request.BucketName == AnalyticsBucket),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new ListObjectsV2Response
+            {
+                S3Objects =
+                [
+                    new S3Object { Key = "usage_daily/date=2026-07-10/client_type=KIRO_CLI/report.parquet" },
+                    new S3Object { Key = "model_messages/date=2026-07-10/client_type=KIRO_CLI/report.parquet" },
+                ],
+                IsTruncated = false,
+            });
+        s3.SetupSequence(client => client.PutObjectAsync(
+                It.IsAny<PutObjectRequest>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new PutObjectResponse())
+            .ThrowsAsync(new AmazonS3Exception("write failed"));
+        var service = CreateService(s3, CreateSsmMock(TargetEmail));
+
+        await Assert.That(() => service.ProcessCsv(RawBucket, "reports/report.csv"))
+            .Throws<AmazonS3Exception>();
+
+        s3.Verify(client => client.DeleteObjectAsync(
+            It.IsAny<DeleteObjectRequest>(),
+            It.IsAny<CancellationToken>()), Times.Exactly(4));
+    }
+
+    [Test]
+    public async Task ProcessCsv_AnalyticsListingTruncatedWithoutToken_ThrowsBeforePublishing()
+    {
+        var s3 = CreateS3Mock();
+        s3.Setup(client => client.ListObjectsV2Async(
+                It.Is<ListObjectsV2Request>(request => request.BucketName == AnalyticsBucket),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new ListObjectsV2Response
+            {
+                S3Objects = [],
+                IsTruncated = true,
+                NextContinuationToken = null,
+            });
+        var service = CreateService(s3, CreateSsmMock(TargetEmail));
+
+        await Assert.That(() => service.ProcessCsv(RawBucket, "report.csv"))
+            .Throws<InvalidOperationException>();
+
+        s3.Verify(client => client.PutObjectAsync(
+            It.IsAny<PutObjectRequest>(),
+            It.IsAny<CancellationToken>()), Times.Never);
+        s3.Verify(client => client.DeleteObjectAsync(
+            It.IsAny<DeleteObjectRequest>(),
+            It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Test]
+    public async Task ProcessCsv_VersionedSource_ReadsNotifiedVersion()
+    {
+        var s3 = CreateS3Mock();
+        var service = CreateService(s3, CreateSsmMock(TargetEmail));
+
+        await service.ProcessCsv(new IngestSource(RawBucket, "report.csv", "version-7", "0A"));
+
+        s3.Verify(client => client.GetObjectAsync(
+            It.Is<GetObjectRequest>(request =>
+                request.BucketName == RawBucket &&
+                request.Key == "report.csv" &&
+                request.VersionId == "version-7"),
+            It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Test]
+    public async Task ProcessCsv_SequencerStateWriteFails_PreservesCompleteGeneration()
+    {
+        var s3 = CreateS3Mock();
+        s3.Setup(client => client.PutObjectAsync(
+                It.Is<PutObjectRequest>(request => request.Key.StartsWith("ingest-state/", StringComparison.Ordinal)),
+                It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new AmazonS3Exception("state timeout"));
+        var service = CreateService(s3, CreateSsmMock(TargetEmail));
+
+        await Assert.That(() => service.ProcessCsv(new IngestSource(
+                RawBucket,
+                "report.csv",
+                "version-1",
+                "0A")))
+            .Throws<AmazonS3Exception>();
+
+        s3.Verify(client => client.PutObjectAsync(
+            It.Is<PutObjectRequest>(request => request.Key.EndsWith(".parquet", StringComparison.Ordinal)),
+            It.IsAny<CancellationToken>()), Times.Exactly(2));
+        s3.Verify(client => client.DeleteObjectAsync(
+            It.IsAny<DeleteObjectRequest>(),
+            It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Test]
+    public async Task ProcessCsv_OlderSequencer_SkipsWithoutReadingRawObject()
+    {
+        var s3 = CreateS3Mock(savedSequencer: "0A");
+        var service = CreateService(s3, CreateSsmMock(TargetEmail));
+
+        await service.ProcessCsv(new IngestSource(RawBucket, "report.csv", "version-1", "09"));
+
+        s3.Verify(client => client.GetObjectAsync(
+            It.Is<GetObjectRequest>(request => request.BucketName == RawBucket),
+            It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Test]
+    public async Task ProcessCsv_ExpectedDateDiffersFromCsv_Throws()
+    {
+        var service = CreateService(CreateS3Mock(), CreateSsmMock(TargetEmail));
+
+        await Assert.That(() => service.ProcessCsv(new IngestSource(
+                RawBucket,
+                "report.csv",
+                expectedDate: new DateOnly(2026, 7, 9))))
+            .Throws<InvalidDataException>();
+    }
+
+    [Test]
+    public async Task ProcessCsv_WithContext_LogsStructuredCounts()
+    {
+        var service = CreateService(CreateS3Mock(), CreateSsmMock(TargetEmail));
+        var logger = new Mock<ILambdaLogger>();
+        var context = new Mock<ILambdaContext>();
+        context.Setup(value => value.Logger).Returns(logger.Object);
+
+        await service.ProcessCsv(RawBucket, "report.csv", context.Object);
+
+        logger.Verify(value => value.LogInformation(It.Is<string>(message =>
+            message.Contains("\"event\":\"ingest_complete\"", StringComparison.Ordinal) &&
+            message.Contains("\"rows_read\":1", StringComparison.Ordinal) &&
+            message.Contains("\"rows_kept\":1", StringComparison.Ordinal) &&
+            message.Contains("\"usage_daily_rows\":1", StringComparison.Ordinal) &&
+            message.Contains("\"model_messages_rows\":1", StringComparison.Ordinal))), Times.Once);
+    }
+
+    [Test]
+    public async Task ProcessCsv_MalformedReport_LogsStructuredErrorAndThrows()
+    {
+        var malformed = "Date,User_Email\n2026-07-10,dwalleck@proton.me";
+        var service = CreateService(CreateS3Mock(_ => malformed), CreateSsmMock(TargetEmail));
+        var logger = new Mock<ILambdaLogger>();
+        var context = new Mock<ILambdaContext>();
+        context.Setup(value => value.Logger).Returns(logger.Object);
+
+        await Assert.That(() => service.ProcessCsv(RawBucket, "bad.csv", context.Object))
+            .Throws<InvalidDataException>();
+
+        logger.Verify(value => value.LogError(It.Is<string>(message =>
+            message.Contains("\"event\":\"ingest_error\"", StringComparison.Ordinal) &&
+            message.Contains("\"Key\":\"bad.csv\"", StringComparison.Ordinal))), Times.Once);
+    }
+
+    [Test]
+    public async Task ProcessBackfill_NullS3Objects_CompletesWithoutProcessing()
+    {
+        var s3 = CreateS3Mock();
+        s3.Setup(client => client.ListObjectsV2Async(
+                It.Is<ListObjectsV2Request>(request => request.BucketName == RawBucket),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new ListObjectsV2Response
+            {
+                S3Objects = null,
+                IsTruncated = false,
+            });
+        var service = CreateService(s3, CreateSsmMock(TargetEmail));
+
+        await service.ProcessBackfillAsync(null, null);
+
+        s3.Verify(client => client.GetObjectAsync(
+            It.Is<GetObjectRequest>(request => request.BucketName == RawBucket),
+            It.IsAny<CancellationToken>()), Times.Never);
+    }
 
     [Test]
     public async Task ProcessBackfill_AllCsvKeys_ProcessesEach()
     {
         var keys = new[]
         {
-            BackfillKey("2026-07-10", "KIRO_CLI_report"),
-            BackfillKey("2026-07-10", "KIRO_IDE_report"),
+            BackfillKey("2026-07-09", "a"),
+            BackfillKey("2026-07-10", "b"),
         };
         var s3 = CreateBackfillS3Mock(keys);
-        var ssm = CreateSsmMock(TargetEmail);
-        var service = CreateService(s3, ssm);
+        var service = CreateService(s3, CreateSsmMock(TargetEmail));
 
-        await service.ProcessBackfillAsync(null, null, null);
+        await service.ProcessBackfillAsync(null, null);
 
-        // Each key should trigger GetObject → transform → PutObject.
-        s3.Verify(s => s.GetObjectAsync(
-            It.IsAny<GetObjectRequest>(), It.IsAny<CancellationToken>()),
-            Times.Exactly(keys.Length));
-        s3.Verify(s => s.PutObjectAsync(
-            It.IsAny<PutObjectRequest>(), It.IsAny<CancellationToken>()),
-            Times.Exactly(keys.Length * 2)); // 2 facts per key
+        s3.Verify(client => client.GetObjectAsync(
+            It.Is<GetObjectRequest>(request => request.BucketName == RawBucket),
+            It.IsAny<CancellationToken>()), Times.Exactly(2));
     }
 
     [Test]
-    public async Task ProcessBackfill_NullS3Objects_CompletesWithoutThrowing()
-    {
-        var s3 = CreateS3Mock(TestCsv);
-        s3.Setup(s => s.ListObjectsV2Async(
-                It.IsAny<ListObjectsV2Request>(),
-                It.IsAny<CancellationToken>()))
-            .ReturnsAsync(() => new ListObjectsV2Response
-            {
-                S3Objects = null,  // SDK v4 returns null for empty pages
-                IsTruncated = false,
-            });
-        var ssm = CreateSsmMock(TargetEmail);
-        var service = CreateService(s3, ssm);
-
-        await service.ProcessBackfillAsync(null, null, null);
-
-        // No crash — the ?? [] guard handles null.
-        s3.Verify(s => s.GetObjectAsync(
-            It.IsAny<GetObjectRequest>(), It.IsAny<CancellationToken>()),
-            Times.Never);
-    }
-
-    [Test]
-    public async Task ProcessBackfill_SkipsNonCsvObjects()
-    {
-        var keys = new[]
-        {
-            BackfillKey("2026-07-10", "report"),          // .csv
-            $"{TestRawPrefix}some-marker",                 // no extension, skip
-            $"{TestRawPrefix}notes.txt",                   // .txt, skip
-            BackfillKey("2026-07-10", "other_report"),     // .csv
-        };
-        var s3 = CreateBackfillS3Mock(keys);
-        var ssm = CreateSsmMock(TargetEmail);
-        var service = CreateService(s3, ssm);
-
-        await service.ProcessBackfillAsync(null, null, null);
-
-        s3.Verify(s => s.GetObjectAsync(
-            It.IsAny<GetObjectRequest>(), It.IsAny<CancellationToken>()),
-            Times.Exactly(2)); // Only the two .csv keys
-    }
-
-    [Test]
-    public async Task ProcessBackfill_FromDate_FiltersBefore()
+    public async Task ProcessBackfill_DateBounds_ProcessOnlyRange()
     {
         var keys = new[]
         {
             BackfillKey("2026-06-20", "early"),
-            BackfillKey("2026-07-01", "mid"),
+            BackfillKey("2026-07-01", "middle"),
             BackfillKey("2026-07-10", "late"),
         };
         var s3 = CreateBackfillS3Mock(keys);
-        var ssm = CreateSsmMock(TargetEmail);
-        var service = CreateService(s3, ssm);
+        var service = CreateService(s3, CreateSsmMock(TargetEmail));
 
-        await service.ProcessBackfillAsync(new DateOnly(2026, 7, 1), null, null);
+        await service.ProcessBackfillAsync(new DateOnly(2026, 7, 1), new DateOnly(2026, 7, 5));
 
-        // Only mid and late (>= 2026-07-01) should be processed.
-        s3.Verify(s => s.GetObjectAsync(
-            It.IsAny<GetObjectRequest>(), It.IsAny<CancellationToken>()),
-            Times.Exactly(2));
+        s3.Verify(client => client.GetObjectAsync(
+            It.Is<GetObjectRequest>(request => request.BucketName == RawBucket),
+            It.IsAny<CancellationToken>()), Times.Once);
     }
 
     [Test]
-    public async Task ProcessBackfill_ToDate_FiltersAfter()
+    public async Task ProcessBackfill_PoisonObject_ProcessesLaterObjectsThenThrows()
     {
-        var keys = new[]
-        {
-            BackfillKey("2026-06-20", "early"),
-            BackfillKey("2026-07-05", "mid"),
-            BackfillKey("2026-07-10", "late"),
-        };
-        var s3 = CreateBackfillS3Mock(keys);
-        var ssm = CreateSsmMock(TargetEmail);
-        var service = CreateService(s3, ssm);
-
-        await service.ProcessBackfillAsync(null, new DateOnly(2026, 7, 5), null);
-
-        // Only early and mid (<= 2026-07-05) should be processed.
-        s3.Verify(s => s.GetObjectAsync(
-            It.IsAny<GetObjectRequest>(), It.IsAny<CancellationToken>()),
-            Times.Exactly(2));
-    }
-
-    [Test]
-    public async Task ProcessBackfill_FromAndTo_NarrowsToRange()
-    {
-        var keys = new[]
-        {
-            BackfillKey("2026-06-20", "early"),
-            BackfillKey("2026-07-01", "mid"),
-            BackfillKey("2026-07-05", "late"),
-            BackfillKey("2026-07-10", "latest"),
-        };
-        var s3 = CreateBackfillS3Mock(keys);
-        var ssm = CreateSsmMock(TargetEmail);
-        var service = CreateService(s3, ssm);
-
-        await service.ProcessBackfillAsync(new DateOnly(2026, 7, 1), new DateOnly(2026, 7, 5), null);
-
-        s3.Verify(s => s.GetObjectAsync(
-            It.IsAny<GetObjectRequest>(), It.IsAny<CancellationToken>()),
-            Times.Exactly(2)); // mid + late only
-    }
-
-    [Test]
-    public async Task ProcessBackfill_UnparseableDate_IsSkipped()
-    {
-        // A key whose path segments don't form a valid date.
-        var keys = new[]
-        {
-            $"{TestRawPrefix}us-east-1/not/a/date/00/report.csv",
-            BackfillKey("2026-07-10", "good"),
-        };
-        var s3 = CreateBackfillS3Mock(keys);
-        var ssm = CreateSsmMock(TargetEmail);
-        var service = CreateService(s3, ssm);
-
-        await service.ProcessBackfillAsync(null, null, null);
-
-        // Both keys are .csv, but only good passes the date filter when bounds are unbounded.
-        // Without bounds, date extraction isn't even attempted, so both are processed.
-        // Actually, with unbounded, both are processed (no date filter applied).
-        s3.Verify(s => s.GetObjectAsync(
-            It.IsAny<GetObjectRequest>(), It.IsAny<CancellationToken>()),
-            Times.Exactly(2));
-    }
-
-    [Test]
-    public async Task ProcessBackfill_UnparseableDate_WithBounds_IsSkipped()
-    {
-        var keys = new[]
-        {
-            $"{TestRawPrefix}us-east-1/not/a/date/00/report.csv",
-            BackfillKey("2026-07-10", "good"),
-        };
-        var s3 = CreateBackfillS3Mock(keys);
-        var ssm = CreateSsmMock(TargetEmail);
-        var service = CreateService(s3, ssm);
-
-        await service.ProcessBackfillAsync(new DateOnly(2026, 7, 1), new DateOnly(2026, 7, 15), null);
-
-        // With date bounds, unparseable date keys are skipped.
-        s3.Verify(s => s.GetObjectAsync(
-            It.IsAny<GetObjectRequest>(), It.IsAny<CancellationToken>()),
-            Times.Exactly(1));
-    }
-
-    [Test]
-    public async Task ProcessBackfill_WithContext_LogsProgress()
-    {
-        var keys = new[] { BackfillKey("2026-07-10", "report") };
-        var s3 = CreateBackfillS3Mock(keys);
-        var ssm = CreateSsmMock(TargetEmail);
-        var service = CreateService(s3, ssm);
-
-        var mockLogger = new Mock<ILambdaLogger>();
-        var context = new Mock<ILambdaContext>();
-        context.Setup(c => c.Logger).Returns(mockLogger.Object);
-
-        await service.ProcessBackfillAsync(null, null, context.Object);
-
-        mockLogger.Verify(
-            l => l.LogInformation(It.Is<string>(s => s.Contains("Backfill: listing objects"))),
-            Times.Once);
-        mockLogger.Verify(
-            l => l.LogInformation(It.Is<string>(s => s.Contains("Backfill: complete"))),
-            Times.Once);
-    }
-
-    [Test]
-    public async Task ProcessBackfill_InvalidCalendarDate_IsSkipped()
-    {
-        // Feb 30 is a numerically parseable but calendar-invalid date.
-        // TryParseExact should reject it gracefully (returns null, key is skipped).
-        var keys = new[]
-        {
-            $"{TestRawPrefix}us-east-1/2026/02/30/00/bad.csv",
-            BackfillKey("2026-07-10", "good"),
-        };
-        var s3 = CreateBackfillS3Mock(keys);
-        var ssm = CreateSsmMock(TargetEmail);
-        var service = CreateService(s3, ssm);
-
-        await service.ProcessBackfillAsync(new DateOnly(2026, 7, 1), null, null);
-
-        // Only the valid-date key should be processed; Feb 30 is silently skipped.
-        s3.Verify(s => s.GetObjectAsync(
-            It.IsAny<GetObjectRequest>(), It.IsAny<CancellationToken>()),
-            Times.Exactly(1));
-    }
-
-    [Test]
-    public async Task ProcessBackfill_Paginates_WhenTruncated()
-    {
-        var page1 = new[] { BackfillKey("2026-07-10", "a") };
-        var page2 = new[] { BackfillKey("2026-07-10", "b") };
-
-        var s3 = CreateS3Mock(TestCsv);
-        var callIndex = 0;
-        s3.Setup(s => s.ListObjectsV2Async(
-                It.IsAny<ListObjectsV2Request>(),
+        var badKey = BackfillKey("2026-07-09", "bad");
+        var goodKey = BackfillKey("2026-07-10", "good");
+        var s3 = CreateBackfillS3Mock([badKey, goodKey]);
+        s3.Setup(client => client.GetObjectAsync(
+                It.Is<GetObjectRequest>(request => request.Key == badKey),
                 It.IsAny<CancellationToken>()))
-            .ReturnsAsync(() =>
+            .ThrowsAsync(new AmazonS3Exception("poison"));
+        var service = CreateService(s3, CreateSsmMock(TargetEmail));
+
+        await Assert.That(() => service.ProcessBackfillAsync(null, null))
+            .Throws<AggregateException>();
+
+        s3.Verify(client => client.GetObjectAsync(
+            It.Is<GetObjectRequest>(request => request.Key == goodKey),
+            It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Test]
+    public async Task ProcessBackfill_InvalidKey_ContinuesThenThrowsAggregate()
+    {
+        var goodKey = BackfillKey("2026-07-10", "good");
+        var s3 = CreateBackfillS3Mock([$"{RawPrefix}bad.csv", goodKey]);
+        var service = CreateService(s3, CreateSsmMock(TargetEmail));
+
+        await Assert.That(() => service.ProcessBackfillAsync(null, null))
+            .Throws<AggregateException>();
+
+        s3.Verify(client => client.GetObjectAsync(
+            It.Is<GetObjectRequest>(request => request.Key == goodKey),
+            It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Test]
+    public async Task ProcessBackfill_InvertedBounds_ThrowsBeforeListing()
+    {
+        var s3 = CreateS3Mock();
+        var service = CreateService(s3, CreateSsmMock(TargetEmail));
+
+        await Assert.That(() => service.ProcessBackfillAsync(
+                new DateOnly(2026, 7, 10),
+                new DateOnly(2026, 7, 1)))
+            .Throws<ArgumentException>();
+
+        s3.Verify(client => client.ListObjectsV2Async(
+            It.IsAny<ListObjectsV2Request>(),
+            It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Test]
+    public async Task ProcessBackfill_TruncatedPage_SchedulesNextPage()
+    {
+        var firstKey = BackfillKey("2026-07-09", "first");
+        var s3 = CreateS3Mock(request => CsvForDate(DateFromBackfillKey(request.Key)));
+        s3.Setup(client => client.ListObjectsV2Async(
+                It.Is<ListObjectsV2Request>(request => request.BucketName == RawBucket),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new ListObjectsV2Response
             {
-                var isFirst = Interlocked.Increment(ref callIndex) == 1;
-                return new ListObjectsV2Response
-                {
-                    S3Objects = isFirst
-                        ? [new S3Object { Key = page1[0] }]
-                        : [new S3Object { Key = page2[0] }],
-                    IsTruncated = isFirst,
-                    NextContinuationToken = isFirst ? "token1" : null,
-                };
+                S3Objects = [new S3Object { Key = firstKey }],
+                IsTruncated = true,
+                NextContinuationToken = "next",
             });
-        var ssm = CreateSsmMock(TargetEmail);
-        var service = CreateService(s3, ssm);
+        var scheduler = new Mock<IBackfillContinuationScheduler>();
+        var service = CreateService(s3, CreateSsmMock(TargetEmail), scheduler.Object);
 
-        await service.ProcessBackfillAsync(null, null, null);
+        await service.ProcessBackfillAsync(null, null);
 
-        s3.Verify(s => s.ListObjectsV2Async(
-            It.IsAny<ListObjectsV2Request>(), It.IsAny<CancellationToken>()),
-            Times.Exactly(2));
-        s3.Verify(s => s.GetObjectAsync(
-            It.IsAny<GetObjectRequest>(), It.IsAny<CancellationToken>()),
-            Times.Exactly(2));
-    }
-
-    // ── Observability (ticket 13) ──────────────────────────────────────
-
-    [Test]
-    public async Task ProcessCsv_StructuredLog_HasCorrectRowCounts()
-    {
-        var s3 = CreateS3Mock(TestCsv);
-        var ssm = CreateSsmMock(TargetEmail);
-        var service = CreateService(s3, ssm);
-
-        var mockLogger = new Mock<ILambdaLogger>();
-        var context = new Mock<ILambdaContext>();
-        context.Setup(c => c.Logger).Returns(mockLogger.Object);
-
-        await service.ProcessCsv("bucket", "key.csv", context.Object);
-
-        // The single test row has 1 data row → rows_read=1, rows_kept=1 (matches target).
-        mockLogger.Verify(
-            l => l.LogInformation(It.Is<string>(s =>
-                s.Contains("\"rows_read\":1") &&
-                s.Contains("\"rows_kept\":1"))),
-            Times.Once);
-    }
-
-    [Test]
-    public async Task ProcessCsv_S3ReadError_LogsStructuredErrorAndThrows()
-    {
-        var s3 = new Mock<IAmazonS3>();
-        s3.Setup(s => s.GetObjectAsync(
-                It.IsAny<GetObjectRequest>(),
-                It.IsAny<CancellationToken>()))
-            .ThrowsAsync(new AmazonS3Exception("Access denied"));
-        var ssm = CreateSsmMock(TargetEmail);
-        var service = CreateService(s3, ssm);
-
-        var mockLogger = new Mock<ILambdaLogger>();
-        var context = new Mock<ILambdaContext>();
-        context.Setup(c => c.Logger).Returns(mockLogger.Object);
-
-        await Assert.That(() => service.ProcessCsv("bucket", "bad-key.csv", context.Object))
-            .Throws<AmazonS3Exception>();
-
-        // The structured error log must include the required fields.
-        mockLogger.Verify(
-            l => l.LogError(It.Is<string>(s =>
-                s.Contains("\"event\":\"ingest_error\"") &&
-                s.Contains("\"Bucket\":\"bucket\"") &&
-                s.Contains("\"Key\":\"bad-key.csv\"") &&
-                s.Contains("\"error\":\"Access denied\"") &&
-                s.Contains("\"type\":\"AmazonS3Exception\""))),
-            Times.Once);
-    }
-
-    [Test]
-    public async Task ProcessCsv_RowsReadGreaterThanRowsKept_WhenTargetListFiltersOut()
-    {
-        // Two rows: one matches target, one does not.
-        var csv =
-            "Date,UserId,Client_Type,Credits_Used,Overage_Cap,User_Email,auto_messages\n" +
-            "2026-07-10,u1,KIRO_CLI,1.0,2500,dwalleck@proton.me,1\n" +
-            "2026-07-10,u2,KIRO_CLI,2.0,2500,someone.else@example.com,2";
-        var s3 = CreateS3Mock(csv);
-        var ssm = CreateSsmMock(TargetEmail);
-        var service = CreateService(s3, ssm);
-
-        var mockLogger = new Mock<ILambdaLogger>();
-        var context = new Mock<ILambdaContext>();
-        context.Setup(c => c.Logger).Returns(mockLogger.Object);
-
-        await service.ProcessCsv("bucket", "key.csv", context.Object);
-
-        // rows_read=2 (both rows), rows_kept=1 (only the matching one).
-        mockLogger.Verify(
-            l => l.LogInformation(It.Is<string>(s =>
-                s.Contains("\"rows_read\":2") &&
-                s.Contains("\"rows_kept\":1"))),
-            Times.Once);
+        scheduler.Verify(value => value.ScheduleAsync(null, null, "next"), Times.Once);
+        s3.Verify(client => client.ListObjectsV2Async(
+            It.Is<ListObjectsV2Request>(request => request.BucketName == RawBucket),
+            It.IsAny<CancellationToken>()), Times.Once);
     }
 }

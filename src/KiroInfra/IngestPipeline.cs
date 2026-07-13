@@ -26,11 +26,11 @@ namespace KiroInfra
 
         public Function Function { get; }
 
-    public Queue DeadLetterQueue { get; }
+        public Queue DeadLetterQueue { get; }
 
-    public Alarm ErrorAlarm { get; }
+        public Alarm ErrorAlarm { get; }
 
-    public Alarm DlqDepthAlarm { get; }
+        public Alarm DlqDepthAlarm { get; }
 
         public IngestPipeline(
             Construct scope,
@@ -52,7 +52,8 @@ namespace KiroInfra
                 Architecture = Architecture.X86_64,
                 Handler = "KiroIngest",
                 MemorySize = 512,
-                Timeout = Duration.Seconds(60),
+                Timeout = Duration.Minutes(15),
+                ReservedConcurrentExecutions = 1,
                 Description = "Kiro usage ingest: User Activity Report CSV -> filtered/unpivoted Parquet",
                 Code = Code.FromAsset(LambdaProjectPath, new AssetOptions
                 {
@@ -81,12 +82,20 @@ namespace KiroInfra
                 },
             });
 
-            // Least-privilege grants (spec 7.3): prefix-scoped read on raw; writes limited
-            // to the two curated prefixes; read the Target List parameter. No KMS, no Glue.
+            // Prefix-scoped raw reads; curated read/write for source-output
+            // reconciliation; ingest-state read/write for sequencer ordering; and Target
+            // List read. No Glue or Athena access.
             rawBucket.GrantRead(Function, $"{userReportPrefix}*");
-            analyticsBucket.GrantWrite(Function, "usage_daily/*");
-            analyticsBucket.GrantWrite(Function, "model_messages/*");
+            analyticsBucket.GrantReadWrite(Function, "usage_daily/*");
+            analyticsBucket.GrantReadWrite(Function, "model_messages/*");
+            analyticsBucket.GrantReadWrite(Function, "ingest-state/*");
             targetList.GrantRead(Function);
+            Function.AddToRolePolicy(new PolicyStatement(new PolicyStatementProps
+            {
+                Effect = Effect.ALLOW,
+                Actions = ["lambda:InvokeFunction"],
+                Resources = [Function.FunctionArn],
+            }));
 
             // Event-driven trigger (spec 7.4). CDK adds the scoped s3.amazonaws.com invoke
             // permission automatically.
