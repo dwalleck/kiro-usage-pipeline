@@ -56,17 +56,19 @@ public sealed class IngestService : IIngestService
         {
             if (partition.UsageDaily.Count > 0)
             {
+                using var parquet = await ParquetSerialization.SerializeAsync(partition.UsageDaily);
                 await WriteParquetAsync(
                     ReportTransform.OutputKey(UsageDailyPrefix, partition.Date, partition.ClientType, key),
-                    await ParquetSerialization.SerializeAsync(partition.UsageDaily));
+                    parquet);
                 usageWritten += partition.UsageDaily.Count;
             }
 
             if (partition.ModelMessages.Count > 0)
             {
+                using var parquet = await ParquetSerialization.SerializeAsync(partition.ModelMessages);
                 await WriteParquetAsync(
                     ReportTransform.OutputKey(ModelMessagesPrefix, partition.Date, partition.ClientType, key),
-                    await ParquetSerialization.SerializeAsync(partition.ModelMessages));
+                    parquet);
                 modelWritten += partition.ModelMessages.Count;
             }
         }
@@ -77,18 +79,16 @@ public sealed class IngestService : IIngestService
     }
 
     // Backfill: enumerate all .csv objects under the raw prefix, optionally bounded by
-    // from/to ISO dates, and process each sequentially. The same ProcessCsv core
-    // (transform + Target-List filter + Parquet write) is reused identically.
-    public async Task ProcessBackfillAsync(string? fromDate, string? toDate, ILambdaContext? context = null)
+    // from/to DateOnly bounds, and process each sequentially per page (no full-list
+    // buffering). The same ProcessCsv core (transform + Target-List filter + Parquet
+    // write) is reused identically.
+    public async Task ProcessBackfillAsync(DateOnly? from, DateOnly? to, ILambdaContext? context = null)
     {
-        DateOnly? from = fromDate is not null ? ParseDateOnly(fromDate) : null;
-        DateOnly? to = toDate is not null ? ParseDateOnly(toDate) : null;
-
         context?.Logger.LogInformation(
             $"Backfill: listing objects under s3://{_rawBucket}/{_rawPrefix} " +
-            $"(from={fromDate ?? "unbounded"}, to={toDate ?? "unbounded"})");
+            $"(from={from?.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture) ?? "unbounded"}, to={to?.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture) ?? "unbounded"})");
 
-        var matchingKeys = new List<string>();
+        var processed = 0;
         string? continuationToken = null;
 
         do
@@ -100,7 +100,7 @@ public sealed class IngestService : IIngestService
                 ContinuationToken = continuationToken,
             });
 
-            foreach (var obj in response.S3Objects)
+            foreach (var obj in response.S3Objects ?? [])
             {
                 if (!obj.Key.EndsWith(".csv", StringComparison.OrdinalIgnoreCase))
                 {
@@ -115,18 +115,21 @@ public sealed class IngestService : IIngestService
                         continue;
                     }
 
-                    if (from is not null && keyDate < from)
+                    if (keyDate < from)
                     {
                         continue;
                     }
 
-                    if (to is not null && keyDate > to)
+                    if (keyDate > to)
                     {
                         continue;
                     }
                 }
 
-                matchingKeys.Add(obj.Key);
+                processed++;
+                context?.Logger.LogInformation(
+                    $"Backfill: [{processed}] s3://{_rawBucket}/{obj.Key}");
+                await ProcessCsv(_rawBucket, obj.Key, context);
             }
 
             continuationToken = response.IsTruncated == true ? response.NextContinuationToken : null;
@@ -134,50 +137,24 @@ public sealed class IngestService : IIngestService
         while (continuationToken is not null);
 
         context?.Logger.LogInformation(
-            $"Backfill: found {matchingKeys.Count} CSV objects to process");
-
-        for (var i = 0; i < matchingKeys.Count; i++)
-        {
-            context?.Logger.LogInformation(
-                $"Backfill: [{i + 1}/{matchingKeys.Count}] s3://{_rawBucket}/{matchingKeys[i]}");
-            await ProcessCsv(_rawBucket, matchingKeys[i], context);
-        }
-
-        context?.Logger.LogInformation(
-            $"Backfill: complete — {matchingKeys.Count} objects processed");
+            $"Backfill: complete — {processed} objects processed");
     }
 
     // Extract the report date from the Hive-style path segments:
     // .../user_report/{region}/{yyyy}/{mm}/{dd}/00/{filename}.csv
+    // Uses TryParseExact for calendar validation (e.g. Feb 30 → null).
     private static DateOnly? ExtractDateFromKey(string key)
     {
         var parts = key.Split('/');
-        // Walk backwards from the end:
-        //   ^1 = filename.csv, ^2 = "00", ^3 = dd, ^4 = mm, ^5 = yyyy
         if (parts.Length < 6)
         {
             return null;
         }
 
-        var dd = parts[^3];   // e.g. "10"
-        var mm = parts[^4];   // e.g. "07"
-        var yyyy = parts[^5]; // e.g. "2026"
-
-        if (int.TryParse(yyyy, out var year) &&
-            int.TryParse(mm, out var month) &&
-            int.TryParse(dd, out var day) &&
-            year >= 2000 && year <= 2100 &&
-            month >= 1 && month <= 12 &&
-            day >= 1 && day <= 31)
-        {
-            return new DateOnly(year, month, day);
-        }
-
-        return null;
+        var dateStr = $"{parts[^5]}-{parts[^4]}-{parts[^3]}";
+        return DateOnly.TryParseExact(dateStr, "yyyy-MM-dd", CultureInfo.InvariantCulture,
+            DateTimeStyles.None, out var date) ? date : null;
     }
-
-    private static DateOnly ParseDateOnly(string value) =>
-        DateOnly.Parse(value, CultureInfo.InvariantCulture);
 
     private async Task<string> ReadObjectTextAsync(string bucket, string key)
     {
@@ -190,16 +167,18 @@ public sealed class IngestService : IIngestService
         return await reader.ReadToEndAsync();
     }
 
-    private async Task WriteParquetAsync(string key, byte[] parquet)
+    private async Task WriteParquetAsync(string key, Stream parquet)
     {
-        using var body = new MemoryStream(parquet);
-        await _s3.PutObjectAsync(new PutObjectRequest
+        using (parquet)
         {
-            BucketName = _analyticsBucket,
-            Key = key,
-            InputStream = body,
-            ContentType = "application/octet-stream",
-        });
+            await _s3.PutObjectAsync(new PutObjectRequest
+            {
+                BucketName = _analyticsBucket,
+                Key = key,
+                InputStream = parquet,
+                ContentType = "application/octet-stream",
+            });
+        }
     }
 
     private async Task<ISet<string>> GetTargetEmailsAsync()

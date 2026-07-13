@@ -31,7 +31,7 @@ public class FunctionTests
         return JsonSerializer.Serialize(evnt);
     }
 
-    private static string BackfillJson(string? from = null, string? to = null)
+    private static string BackfillJson(DateOnly? from = null, DateOnly? to = null)
     {
         var req = new BackfillRequest { Mode = "backfill", From = from, To = to };
         return JsonSerializer.Serialize(req);
@@ -120,10 +120,12 @@ public class FunctionTests
         var mock = new Mock<IIngestService>();
         var function = new Function(mock.Object);
         var context = Mock.Of<ILambdaContext>();
+        var from = new DateOnly(2026, 6, 20);
+        var to = new DateOnly(2026, 7, 10);
 
-        await function.HandleAsync(ToStream(BackfillJson("2026-06-20", "2026-07-10")), context);
+        await function.HandleAsync(ToStream(BackfillJson(from, to)), context);
 
-        mock.Verify(s => s.ProcessBackfillAsync("2026-06-20", "2026-07-10", context), Times.Once);
+        mock.Verify(s => s.ProcessBackfillAsync(from, to, context), Times.Once);
     }
 
     [Test]
@@ -132,10 +134,11 @@ public class FunctionTests
         var mock = new Mock<IIngestService>();
         var function = new Function(mock.Object);
         var context = Mock.Of<ILambdaContext>();
+        var from = new DateOnly(2026, 6, 20);
 
-        await function.HandleAsync(ToStream(BackfillJson("2026-06-20", null)), context);
+        await function.HandleAsync(ToStream(BackfillJson(from, null)), context);
 
-        mock.Verify(s => s.ProcessBackfillAsync("2026-06-20", null, context), Times.Once);
+        mock.Verify(s => s.ProcessBackfillAsync(from, null, context), Times.Once);
     }
 
     [Test]
@@ -144,9 +147,22 @@ public class FunctionTests
         var mock = new Mock<IIngestService>();
         var function = new Function(mock.Object);
         var context = Mock.Of<ILambdaContext>();
+        var to = new DateOnly(2026, 7, 10);
 
-        await function.HandleAsync(ToStream(BackfillJson(null, "2026-07-10")), context);
+        await function.HandleAsync(ToStream(BackfillJson(null, to)), context);
 
-        mock.Verify(s => s.ProcessBackfillAsync(null, "2026-07-10", context), Times.Once);
+        mock.Verify(s => s.ProcessBackfillAsync(null, to, context), Times.Once);
+    }
+
+    [Test]
+    public async Task HandleAsync_InvalidJson_ThrowsInvalidOperationException()
+    {
+        var mock = new Mock<IIngestService>();
+        var function = new Function(mock.Object);
+        var context = Mock.Of<ILambdaContext>();
+
+        // JSON literal null — Deserialize returns null, null guard throws.
+        await Assert.That(() => function.HandleAsync(ToStream("null"), context))
+            .Throws<InvalidOperationException>();
     }
 }

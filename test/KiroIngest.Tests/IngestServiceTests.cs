@@ -186,6 +186,29 @@ public class IngestServiceTests
     }
 
     [Test]
+    public async Task ProcessBackfill_NullS3Objects_CompletesWithoutThrowing()
+    {
+        var s3 = CreateS3Mock(TestCsv);
+        s3.Setup(s => s.ListObjectsV2Async(
+                It.IsAny<ListObjectsV2Request>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(() => new ListObjectsV2Response
+            {
+                S3Objects = null,  // SDK v4 returns null for empty pages
+                IsTruncated = false,
+            });
+        var ssm = CreateSsmMock(TargetEmail);
+        var service = CreateService(s3, ssm);
+
+        await service.ProcessBackfillAsync(null, null, null);
+
+        // No crash — the ?? [] guard handles null.
+        s3.Verify(s => s.GetObjectAsync(
+            It.IsAny<GetObjectRequest>(), It.IsAny<CancellationToken>()),
+            Times.Never);
+    }
+
+    [Test]
     public async Task ProcessBackfill_SkipsNonCsvObjects()
     {
         var keys = new[]
@@ -219,7 +242,7 @@ public class IngestServiceTests
         var ssm = CreateSsmMock(TargetEmail);
         var service = CreateService(s3, ssm);
 
-        await service.ProcessBackfillAsync("2026-07-01", null, null);
+        await service.ProcessBackfillAsync(new DateOnly(2026, 7, 1), null, null);
 
         // Only mid and late (>= 2026-07-01) should be processed.
         s3.Verify(s => s.GetObjectAsync(
@@ -240,7 +263,7 @@ public class IngestServiceTests
         var ssm = CreateSsmMock(TargetEmail);
         var service = CreateService(s3, ssm);
 
-        await service.ProcessBackfillAsync(null, "2026-07-05", null);
+        await service.ProcessBackfillAsync(null, new DateOnly(2026, 7, 5), null);
 
         // Only early and mid (<= 2026-07-05) should be processed.
         s3.Verify(s => s.GetObjectAsync(
@@ -262,7 +285,7 @@ public class IngestServiceTests
         var ssm = CreateSsmMock(TargetEmail);
         var service = CreateService(s3, ssm);
 
-        await service.ProcessBackfillAsync("2026-07-01", "2026-07-05", null);
+        await service.ProcessBackfillAsync(new DateOnly(2026, 7, 1), new DateOnly(2026, 7, 5), null);
 
         s3.Verify(s => s.GetObjectAsync(
             It.IsAny<GetObjectRequest>(), It.IsAny<CancellationToken>()),
@@ -304,7 +327,7 @@ public class IngestServiceTests
         var ssm = CreateSsmMock(TargetEmail);
         var service = CreateService(s3, ssm);
 
-        await service.ProcessBackfillAsync("2026-07-01", "2026-07-15", null);
+        await service.ProcessBackfillAsync(new DateOnly(2026, 7, 1), new DateOnly(2026, 7, 15), null);
 
         // With date bounds, unparseable date keys are skipped.
         s3.Verify(s => s.GetObjectAsync(
@@ -330,11 +353,30 @@ public class IngestServiceTests
             l => l.LogInformation(It.Is<string>(s => s.Contains("Backfill: listing objects"))),
             Times.Once);
         mockLogger.Verify(
-            l => l.LogInformation(It.Is<string>(s => s.Contains("Backfill: found"))),
-            Times.Once);
-        mockLogger.Verify(
             l => l.LogInformation(It.Is<string>(s => s.Contains("Backfill: complete"))),
             Times.Once);
+    }
+
+    [Test]
+    public async Task ProcessBackfill_InvalidCalendarDate_IsSkipped()
+    {
+        // Feb 30 is a numerically parseable but calendar-invalid date.
+        // TryParseExact should reject it gracefully (returns null, key is skipped).
+        var keys = new[]
+        {
+            $"{TestRawPrefix}us-east-1/2026/02/30/00/bad.csv",
+            BackfillKey("2026-07-10", "good"),
+        };
+        var s3 = CreateBackfillS3Mock(keys);
+        var ssm = CreateSsmMock(TargetEmail);
+        var service = CreateService(s3, ssm);
+
+        await service.ProcessBackfillAsync(new DateOnly(2026, 7, 1), null, null);
+
+        // Only the valid-date key should be processed; Feb 30 is silently skipped.
+        s3.Verify(s => s.GetObjectAsync(
+            It.IsAny<GetObjectRequest>(), It.IsAny<CancellationToken>()),
+            Times.Exactly(1));
     }
 
     [Test]

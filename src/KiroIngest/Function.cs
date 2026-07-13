@@ -8,6 +8,8 @@ namespace KiroIngest;
 //   S3 ObjectCreated notification → live path (process one key)
 //   {"mode":"backfill", "from":?, "to":?}  → backfill path (list-and-process loop)
 // Both converge on ProcessCsv so the transform + Target-List filter are identical.
+// Single-pass JSON parse: JsonDocument reads the stream once, then typed
+// deserialization reuses the in-memory DOM — no buffering, no rewinding.
 public sealed class Function
 {
     private readonly IIngestService _ingest;
@@ -22,40 +24,28 @@ public sealed class Function
         _ingest = ingest;
     }
 
-    // Stream-based entry point: the raw Lambda event body. We peek at the JSON to
-    // decide between live (S3 event) and backfill paths.
     public async Task HandleAsync(Stream input, ILambdaContext context)
     {
-        // Buffer the stream so we can peek at the JSON shape, then deserialize.
-        using var ms = new MemoryStream();
-        await input.CopyToAsync(ms);
-        ms.Position = 0;
-
-        using var doc = await JsonDocument.ParseAsync(ms);
+        using var doc = await JsonDocument.ParseAsync(input);
 
         if (doc.RootElement.TryGetProperty("mode", out var modeProp) &&
             modeProp.GetString() == "backfill")
         {
-            ms.Position = 0;
-            var backfill = await JsonSerializer.DeserializeAsync<BackfillRequest>(ms);
-            await _ingest.ProcessBackfillAsync(backfill!.From, backfill.To, context);
+            var backfill = JsonSerializer.Deserialize<BackfillRequest>(doc.RootElement)
+                ?? throw new InvalidOperationException("Failed to parse backfill payload from JSON");
+            await _ingest.ProcessBackfillAsync(backfill.From, backfill.To, context);
         }
         else
         {
-            ms.Position = 0;
-            var s3Event = await JsonSerializer.DeserializeAsync<S3Event>(ms);
-            await HandleS3EventAsync(s3Event!, context);
+            var s3Event = JsonSerializer.Deserialize<S3Event>(doc.RootElement)
+                ?? throw new InvalidOperationException("Failed to parse S3 event from JSON");
+            await HandleS3EventAsync(s3Event, context);
         }
     }
 
     private async Task HandleS3EventAsync(S3Event evnt, ILambdaContext context)
     {
-        if (evnt.Records is null)
-        {
-            return;
-        }
-
-        foreach (var record in evnt.Records)
+        foreach (var record in evnt.Records ?? [])
         {
             var bucket = record.S3.Bucket.Name;
             // S3 event keys are URL-encoded (e.g. '+' for spaces).

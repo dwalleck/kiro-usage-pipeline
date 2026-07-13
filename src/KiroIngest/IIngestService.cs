@@ -10,6 +10,6 @@ public interface IIngestService
     Task ProcessCsv(string bucket, string key, ILambdaContext? context = null);
 
     // Backfill: list all .csv objects under the raw prefix and process each one
-    // sequentially. from/to are optional ISO date bounds (default unbounded).
-    Task ProcessBackfillAsync(string? fromDate, string? toDate, ILambdaContext? context = null);
+    // sequentially. from/to are optional DateOnly bounds (default unbounded).
+    Task ProcessBackfillAsync(DateOnly? from, DateOnly? to, ILambdaContext? context = null);
 }

@@ -59,8 +59,7 @@ public class ParquetSerializationTests
     private static async Task<(string[] Names, Dictionary<string, Type> Types)> SchemaOf<T>(IReadOnlyList<T> records)
         where T : class, new()
     {
-        var bytes = await ParquetSerialization.SerializeAsync(records);
-        using var stream = new MemoryStream(bytes);
+        using var stream = await ParquetSerialization.SerializeAsync(records);
         await using var reader = await ParquetReader.CreateAsync(stream);
 
         var fields = reader.Schema.DataFields;
