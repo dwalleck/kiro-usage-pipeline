@@ -83,7 +83,13 @@ namespace KiroInfra
 
             // Ingest pipeline: the S3-triggered .NET 10 Lambda that transforms raw
             // User Activity Reports into curated Parquet on the analytics bucket.
-            new IngestPipeline(this, "IngestPipeline", rawBucket, analyticsBucket, targetList);
+            var ingest = new IngestPipeline(this, "IngestPipeline", rawBucket, analyticsBucket, targetList);
+
+            new CfnOutput(this, "IngestLambdaName", new CfnOutputProps
+            {
+                Value = ingest.Function.FunctionName,
+                Description = "Ingest Lambda function name — use for backfill invoke",
+            });
 
             new CfnOutput(this, "RawBucketUri", new CfnOutputProps
             {

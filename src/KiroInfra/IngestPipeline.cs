@@ -12,7 +12,7 @@ namespace KiroInfra
     // The live ingest path: a .NET 10 zip Lambda triggered by ObjectCreated on the raw
     // bucket (user_report/ prefix + .csv suffix). It reads the report, filters to the
     // Target List, Unpivots, and writes usage_daily + model_messages Parquet to the
-    // analytics bucket. Packaged Docker-free via `dotnet publish` local bundling.
+    // analytics bucket. Packaged via Docker bundling with the .NET 10 SDK image.
     public class IngestPipeline : Construct
     {
         // Managed .NET 10 Lambda runtime (GA Jan 2026). Built via the string constructor
@@ -20,7 +20,8 @@ namespace KiroInfra
         private static readonly Runtime DotNet10 = new("dotnet10");
 
         private const string LambdaProjectPath = "src/KiroIngest";
-        private const string PublishRuntime = "linux-x64";
+
+        public Function Function { get; }
 
         public IngestPipeline(
             Construct scope,
@@ -36,7 +37,7 @@ namespace KiroInfra
             // prefix + .csv skips the stray UUID markers and the by_user_analytic reports.
             var userReportPrefix = $"AWSLogs/{account}/KiroLogs/user_report/";
 
-            var function = new Function(this, "Function", new FunctionProps
+            Function = new Function(this, "Function", new FunctionProps
             {
                 Runtime = DotNet10,
                 Architecture = Architecture.X86_64,
@@ -50,30 +51,39 @@ namespace KiroInfra
                     AssetHashType = AssetHashType.OUTPUT,
                     Bundling = new BundlingOptions
                     {
-                        // Docker image is the fallback only; local bundling handles the build.
                         Image = DockerImage.FromRegistry("mcr.microsoft.com/dotnet/sdk:10.0"),
-                        Local = new DotnetLambdaBundling(LambdaProjectPath, PublishRuntime),
+                        Command =
+                        [
+                            "dotnet", "publish",
+                            "-c", "Release",
+                            "-r", "linux-x64",
+                            "--no-self-contained",
+                            "--nologo",
+                            "-o", "/asset-output",
+                        ],
                     },
                 }),
                 Environment = new Dictionary<string, string>
                 {
                     ["ANALYTICS_BUCKET"] = analyticsBucket.BucketName,
                     ["TARGET_LIST_PARAMETER"] = targetList.ParameterName,
+                    ["RAW_BUCKET"] = rawBucket.BucketName,
+                    ["RAW_PREFIX"] = userReportPrefix,
                 },
             });
 
             // Least-privilege grants (spec 7.3): prefix-scoped read on raw; writes limited
             // to the two curated prefixes; read the Target List parameter. No KMS, no Glue.
-            rawBucket.GrantRead(function, $"{userReportPrefix}*");
-            analyticsBucket.GrantWrite(function, "usage_daily/*");
-            analyticsBucket.GrantWrite(function, "model_messages/*");
-            targetList.GrantRead(function);
+            rawBucket.GrantRead(Function, $"{userReportPrefix}*");
+            analyticsBucket.GrantWrite(Function, "usage_daily/*");
+            analyticsBucket.GrantWrite(Function, "model_messages/*");
+            targetList.GrantRead(Function);
 
             // Event-driven trigger (spec 7.4). CDK adds the scoped s3.amazonaws.com invoke
             // permission automatically.
             rawBucket.AddEventNotification(
                 EventType.OBJECT_CREATED,
-                new LambdaDestination(function),
+                new LambdaDestination(Function),
                 new NotificationKeyFilter { Prefix = userReportPrefix, Suffix = ".csv" });
         }
     }

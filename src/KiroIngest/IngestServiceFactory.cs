@@ -9,17 +9,23 @@ public static class IngestServiceFactory
 {
     public const string AnalyticsBucketEnv = "ANALYTICS_BUCKET";
     public const string TargetListParameterEnv = "TARGET_LIST_PARAMETER";
+    public const string RawBucketEnv = "RAW_BUCKET";
+    public const string RawPrefixEnv = "RAW_PREFIX";
 
     public static IngestService FromEnvironment()
     {
         var analyticsBucket = Require(AnalyticsBucketEnv);
         var targetListParameter = Require(TargetListParameterEnv);
+        var rawBucket = Require(RawBucketEnv);
+        var rawPrefix = Require(RawPrefixEnv);
 
         return new IngestService(
             new AmazonS3Client(),
             new AmazonSimpleSystemsManagementClient(),
             analyticsBucket,
-            targetListParameter);
+            targetListParameter,
+            rawBucket,
+            rawPrefix);
     }
 
     private static string Require(string name) =>
