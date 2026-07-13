@@ -2,6 +2,8 @@
 .cdk.staging
 cdk.out
 
+.kiro
+
 # Created by https://www.gitignore.io/api/csharp
 
 ### Csharp ###

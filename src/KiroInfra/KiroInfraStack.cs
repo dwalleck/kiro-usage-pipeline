@@ -81,6 +81,10 @@ namespace KiroInfra
             // kiro-usage Athena workgroup, all reading the analytics bucket.
             new QueryLayer(this, "QueryLayer", analyticsBucket);
 
+            // Ingest pipeline: the S3-triggered .NET 10 Lambda that transforms raw
+            // User Activity Reports into curated Parquet on the analytics bucket.
+            new IngestPipeline(this, "IngestPipeline", rawBucket, analyticsBucket, targetList);
+
             new CfnOutput(this, "RawBucketUri", new CfnOutputProps
             {
                 Value = $"s3://{rawBucket.BucketName}/",
