@@ -22,7 +22,9 @@ namespace KiroInfra
             Construct scope,
             string id,
             IBucket analyticsBucket,
-            string athenaWorkGroupName) : base(scope, id)
+            string athenaWorkGroupName,
+            string workspaceName = WorkspaceName,
+            string workspaceDescription = "Kiro Usage Dashboard — usage analytics over Athena facts") : base(scope, id)
         {
             var account = Stack.Of(this).Account;
             var region = Stack.Of(this).Region;
@@ -53,7 +55,7 @@ namespace KiroInfra
             });
 
             DataSourceRole.AddManagedPolicy(
-                ManagedPolicy.FromAwsManagedPolicyName("AmazonGrafanaAthenaAccess"));
+                ManagedPolicy.FromAwsManagedPolicyName("service-role/AmazonGrafanaAthenaAccess"));
 
             DataSourceRole.AttachInlinePolicy(new Policy(this, "ScopedAthenaPolicy", new PolicyProps
             {
@@ -107,6 +109,15 @@ namespace KiroInfra
                             Resources = curatedPrefixes,
                         }),
 
+                        // Athena validates the existing result bucket and may use
+                        // multipart uploads for large result sets.
+                        new PolicyStatement(new PolicyStatementProps
+                        {
+                            Effect = Effect.ALLOW,
+                            Actions = new[] { "s3:GetBucketLocation", "s3:ListBucketMultipartUploads" },
+                            Resources = new[] { analyticsBucket.BucketArn },
+                        }),
+
                         // List the analytics bucket so Athena can discover partitions.
                         new PolicyStatement(new PolicyStatementProps
                         {
@@ -157,7 +168,7 @@ namespace KiroInfra
                         new PolicyStatement(new PolicyStatementProps
                         {
                             Effect = Effect.ALLOW,
-                            Actions = new[] { "s3:GetObject", "s3:PutObject" },
+                            Actions = new[] { "s3:GetObject", "s3:PutObject", "s3:AbortMultipartUpload", "s3:ListMultipartUploadParts" },
                             Resources = new[] { resultsPrefix },
                         }),
                     },
@@ -175,10 +186,10 @@ namespace KiroInfra
                 AccountAccessType = "CURRENT_ACCOUNT",
                 AuthenticationProviders = new[] { "AWS_SSO" },
                 PermissionType = "CUSTOMER_MANAGED",
-                DataSources = new[] { "ATHENA" },
+                PluginAdminEnabled = true,
                 RoleArn = DataSourceRole.RoleArn,
-                Name = WorkspaceName,
-                Description = "Kiro Usage Dashboard — usage analytics over Athena facts",
+                Name = workspaceName,
+                Description = workspaceDescription,
                 GrafanaVersion = "10.4",
             });
         }

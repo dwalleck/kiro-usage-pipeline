@@ -174,20 +174,20 @@ dotnet build src/KiroIngest/KiroIngest.csproj
 Docker must be running because CDK bundles the Lambda with the .NET 10 SDK image.
 
 ```bash
-npx cdk synth --profile "$AWS_PROFILE" --strict
-npx cdk diff --profile "$AWS_PROFILE" --strict
+npx cdk synth KiroInfraStack --profile "$AWS_PROFILE" --strict
+npx cdk diff KiroInfraStack --profile "$AWS_PROFILE" --strict
 ```
 
 The default is SSE-S3 encryption. To synthesize or deploy with a customer-managed KMS key:
 
 ```bash
-npx cdk synth --profile "$AWS_PROFILE" --strict -c UseCustomKey=true
+npx cdk synth KiroInfraStack --profile "$AWS_PROFILE" --strict -c UseCustomKey=true
 ```
 
 ### 3. Deploy
 
 ```bash
-npx cdk deploy --profile "$AWS_PROFILE" --strict
+npx cdk deploy KiroInfraStack --profile "$AWS_PROFILE" --strict
 ```
 
 Important stack outputs include:
@@ -307,6 +307,109 @@ Select **Save & test** and confirm the connection succeeds.
 
 The dashboards expose shared `$user_email`, `$client_type`, and `$model` variables. Date filters
 are applied to partition keys so Athena can prune scans.
+
+## Temporary Grafana integration spike
+
+This workflow proves automated workspace-role assignment, Athena data-source configuration, and
+dashboard reconciliation against a separate workspace named `Kiro-Usage-Integration-Spike`. It
+does not modify the production-named `Kiro-Usage` workspace in `KiroInfraStack`.
+
+> [!WARNING]
+> The commands in this section create AWS resources and incur Amazon Managed Grafana charges.
+> They require explicit deployment approval. They are not part of a code-only validation run.
+> After deployment, leave the temporary workspace in place for review until cleanup receives
+> separate explicit approval.
+
+Both `us-east-1` and the IAM Identity Center home Region, `us-east-2`, must be CDK-bootstrapped.
+Use the existing IAM Identity Center instance and identity store `d-9a673a2cf5`.
+
+### 1. Deploy the retained Identity Center groups
+
+```bash
+npx cdk deploy KiroIdentityFoundationStack \
+  --profile "$AWS_PROFILE" \
+  --region us-east-2 \
+  --strict
+```
+
+The stack creates and retains three groups. It never manages individual memberships. Read their
+IDs from the stack outputs:
+
+```bash
+ADMIN_GROUP_ID=$(aws cloudformation describe-stacks \
+  --stack-name KiroIdentityFoundationStack \
+  --profile "$AWS_PROFILE" \
+  --region us-east-2 \
+  --query "Stacks[0].Outputs[?OutputKey=='GrafanaAdminGroupId'].OutputValue | [0]" \
+  --output text)
+
+EDITOR_GROUP_ID=$(aws cloudformation describe-stacks \
+  --stack-name KiroIdentityFoundationStack \
+  --profile "$AWS_PROFILE" \
+  --region us-east-2 \
+  --query "Stacks[0].Outputs[?OutputKey=='GrafanaEditorGroupId'].OutputValue | [0]" \
+  --output text)
+
+VIEWER_GROUP_ID=$(aws cloudformation describe-stacks \
+  --stack-name KiroIdentityFoundationStack \
+  --profile "$AWS_PROFILE" \
+  --region us-east-2 \
+  --query "Stacks[0].Outputs[?OutputKey=='GrafanaViewerGroupId'].OutputValue | [0]" \
+  --output text)
+```
+
+In IAM Identity Center, manually:
+
+1. Add the primary operator to `kiro-usage-grafana-admins`.
+2. Add the demo person to `kiro-usage-grafana-viewers`.
+3. Leave `kiro-usage-grafana-editors` empty unless exploratory UI editing is intentional.
+
+### 2. Deploy the isolated spike workspace
+
+Read the existing data-plane bucket from `KiroInfraStack`, then pass it and the group outputs to
+the temporary stack:
+
+```bash
+ANALYTICS_BUCKET=$(aws cloudformation describe-stacks \
+  --stack-name KiroInfraStack \
+  --profile "$AWS_PROFILE" \
+  --region us-east-1 \
+  --query "Stacks[0].Outputs[?OutputKey=='AnalyticsBucketName'].OutputValue | [0]" \
+  --output text)
+
+npx cdk deploy KiroGrafanaIntegrationSpikeStack \
+  --profile "$AWS_PROFILE" \
+  --region us-east-1 \
+  --strict \
+  --parameters AnalyticsBucketName="$ANALYTICS_BUCKET" \
+  --parameters GrafanaAdminGroupId="$ADMIN_GROUP_ID" \
+  --parameters GrafanaEditorGroupId="$EDITOR_GROUP_ID" \
+  --parameters GrafanaViewerGroupId="$VIEWER_GROUP_ID"
+```
+
+The custom-resource provider assigns workspace roles, creates the `Kiro Usage` folder, configures
+the `kiro-athena` data source, verifies its health, and reconciles both committed dashboards. Its
+Admin service-account token lives for at most 15 minutes and is deleted with the service account
+before the CloudFormation operation completes.
+
+### 3. Conduct the manual review
+
+1. As an Admin, verify the stack output URL, Athena health, both dashboards, and live values.
+2. As the demo Viewer, verify both dashboards render and that dashboard editing and
+   Explore/ad hoc Athena querying are unavailable. Stop and record the access-control limitation
+   if the standard Viewer role permits either action.
+3. As an Admin, make a harmless dashboard edit, deploy the spike stack again with the same
+   parameters, and verify the committed JSON restores the dashboard without duplication.
+4. Verify through the workspace and CloudWatch logs that no provisioning service account or token
+   remains.
+
+Dashboard JSON in this repository is authoritative: every spike deployment overwrites UI drift.
+
+### Cleanup requires separate approval
+
+Do not destroy either spike stack as part of deployment or review. Keep the workspace available
+for reviewers. Only begin cleanup after explicit approval; the Identity Center groups use
+`Retain`, so their later removal is a separate deliberate action.
 
 ## Operations
 

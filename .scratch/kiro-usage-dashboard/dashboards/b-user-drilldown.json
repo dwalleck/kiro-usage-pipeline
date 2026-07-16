@@ -10,6 +10,7 @@
     }
   ],
   "title": "B · User Drilldown",
+  "uid": "kiro-usage-user-drilldown",
   "tags": ["kiro", "usage", "drilldown"],
   "timezone": "utc",
   "editable": true,

@@ -1,10 +1,27 @@
-# Kiro Usage Dashboards — Import Guide
+# Kiro Usage Dashboards
 
-After the CDK deploys the Managed Grafana workspace, import these dashboards into the workspace manually.
+The committed JSON files are the source of truth for both dashboard paths.
+
+## Automated temporary integration spike
+
+`KiroGrafanaIntegrationSpikeStack` creates an isolated workspace and its custom-resource provider
+automatically configures the Athena data source, creates the `Kiro Usage` folder, and reconciles
+both dashboards. Do not configure those resources through the Grafana UI. Stable dashboard UIDs
+and `overwrite: true` make each approved deployment restore the committed definitions.
+
+This path creates chargeable AWS resources and requires explicit deployment approval. Follow
+[Temporary Grafana integration spike](../../../README.md#temporary-grafana-integration-spike) for
+the ordered Identity Center, deployment, review, and cleanup-approval workflow.
+
+## Manual production-workspace import
+
+The instructions below apply only to the existing production-named `Kiro-Usage` workspace path in
+`KiroInfraStack`. After CDK deploys that workspace, configure Athena and import the dashboards
+manually.
 
 ## Prerequisites
 
-1. CDK stack deployed (`npx cdk deploy --profile AdministratorAccess-369434902231 --strict`)
+1. `KiroInfraStack` deployed (`npx cdk deploy KiroInfraStack --profile AdministratorAccess-369434902231 --strict`)
 2. IAM Identity Center instance active (exists in us-east-2, ssoins-668452c7eadc7944)
 3. A user/group assigned to the Grafana workspace in IAM Identity Center (Admin role)
 4. Ingest Lambda has processed data (live path + backfill) so the facts have rows

@@ -10,6 +10,7 @@
     }
   ],
   "title": "A · Fleet Overview",
+  "uid": "kiro-usage-fleet-overview",
   "tags": ["kiro", "usage", "fleet"],
   "timezone": "utc",
   "editable": true,
