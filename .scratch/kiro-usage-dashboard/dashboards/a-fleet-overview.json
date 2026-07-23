@@ -246,7 +246,7 @@
     },
     {
       "id": 4,
-      "title": "Fleet Messages",
+      "title": "Fleet Messages & Conversations",
       "type": "stat",
       "gridPos": {
         "h": 4,
@@ -263,6 +263,16 @@
           "refId": "A",
           "format": 1,
           "rawSQL": "SELECT sum(total_messages) AS fleet_messages FROM usage_daily WHERE $__dateFilter(date) AND user_email IN (${user_email:sqlstring}) AND client_type IN (${client_type:sqlstring})",
+          "connectionArgs": {
+            "region": "__default",
+            "catalog": "__default",
+            "database": "__default"
+          }
+        },
+        {
+          "refId": "B",
+          "format": 1,
+          "rawSQL": "SELECT sum(chat_conversations) AS conversations FROM usage_daily WHERE $__dateFilter(date) AND user_email IN (${user_email:sqlstring}) AND client_type IN (${client_type:sqlstring})",
           "connectionArgs": {
             "region": "__default",
             "catalog": "__default",
