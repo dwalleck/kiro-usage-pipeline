@@ -88,12 +88,22 @@ flowchart LR
     Lambda -->|Failed async invocation| DLQ[SQS dead-letter queue]
     Lambda --> Errors[CloudWatch Lambda error alarm]
     DLQ --> Depth[CloudWatch DLQ depth alarm]
+
+    subgraph Provisioning["Deploy-time Grafana provisioning (issue 15)"]
+        Dashboards[Committed dashboard JSON<br/>CDK S3 assets] --> Provisioner[.NET 10 provisioner Lambda<br/>CloudFormation custom resource]
+        GroupIds[Identity Center group IDs<br/>cdk.json context] --> Provisioner
+    end
+    Provisioner -->|Each deploy, short-lived Admin token:<br/>roles, folder, Athena data source, dashboards| Grafana
 ```
 
 The primary stack runs in one AWS account and one region. Its raw, analytics, Lambda, Glue,
-Athena, and permanent Grafana resources are co-located in `us-east-1` by default.
+Athena, and permanent Grafana resources are co-located in `us-east-1` by default. The
+`GrafanaProvisioning` custom resource runs during every deploy and reconciles the workspace
+against the committed dashboard JSON; the Identity Center group IDs it assigns come from
+`KiroIdentityFoundationStack` in `us-east-2` (a permanent prerequisite stack) via `cdk.json`
+context.
 
-### Temporary Grafana automation spike
+### Temporary Grafana automation spike (retired)
 
 ```mermaid
 flowchart LR
@@ -164,14 +174,19 @@ sequencers prevent older overwrite events from replacing newer facts.
 - Athena workgroup `kiro-usage` with an enforced output location and 1 GiB scan cap
 - Amazon Managed Grafana workspace with IAM Identity Center authentication
 - Scoped Grafana IAM role for Athena, Glue, and analytics S3 access
+- Grafana provisioning custom resource + .NET 10 provider Lambda and the two dashboard JSON
+  assets — reconciles workspace roles, the Athena data source, the `Kiro Usage` folder, and
+  both committed dashboards on every deploy
 
 Buckets and an optional KMS key use `RETAIN`, so destroying the stack does not automatically
 delete retained data.
 
-The temporary automation workflow adds:
+`KiroIdentityFoundationStack` in `us-east-2` is a permanent prerequisite: it creates the three
+retained IAM Identity Center groups (Grafana Admins, Editors, Viewers) whose IDs
+`KiroInfraStack` reads from `cdk.json` context to assign workspace roles.
 
-- `KiroIdentityFoundationStack` in `us-east-2`: three retained IAM Identity Center groups for
-  Grafana Admins, Editors, and Viewers.
+The retired integration-spike workflow adds:
+
 - `KiroGrafanaIntegrationSpikeStack` in `us-east-1`: an isolated Managed Grafana workspace,
   scoped Athena role, .NET 10 custom-resource Lambda, and packaged dashboard assets.
 
