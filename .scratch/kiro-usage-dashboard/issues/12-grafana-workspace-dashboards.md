@@ -34,3 +34,16 @@ driven live from `usage_daily` and `model_messages`.
       → Panels use `max(overage_cap)` from real data (2500); documented in README for easy swap.
 - [ ] Verifiable: both dashboards render live data from Athena for the Target User(s).
       → Requires CDK deploy + backfill run + Grafana data source config + dashboard import.
+
+## Comments
+
+- 2026-07-23 — Review-feedback pass (`review/whole-repo-2026-07-23`,
+  `review-2026-07-23-decisions.md`): two deliberate deviations from spec §8 recorded.
+  (1) §8.4's primary "table/alert-list filtered to `utilisation >= 0.9`" is not a separate
+  panel: the ≥90% alert affordance is the "Users ≥ 90% Cap" MTD count stat (green base,
+  red when ≥ 1), backed by the unfiltered MTD Cap Proximity table and the threshold bar
+  gauge — a filtered table would duplicate the stat at the current fleet size. Revisit if
+  the fleet grows. (2) The drilldown's unspecified "User KPIs" stat row is kept as a benign
+  enhancement. Also applied here: Fleet Credits MTD now aggregates true month-to-date, the
+  fleet KPI row gained the §8.1 conversations value, and Daily Detail gained the §8
+  top-model rollup (all three queries executed against the live workgroup before commit).
