@@ -17,7 +17,6 @@ namespace KiroInfra
         public CfnWorkspace Workspace { get; }
         public Role DataSourceRole { get; }
         public const string WorkspaceName = "Kiro-Usage";
-        public const string FolderName = "Kiro Usage";
 
         public GrafanaWorkspace(
             Construct scope,
