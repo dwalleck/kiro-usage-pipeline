@@ -162,7 +162,7 @@
       "targets": [
         {
           "refId": "A",
-          "format": 0,
+          "format": 1,
           "rawSQL": "SELECT count(distinct user_email) AS active_users FROM usage_daily WHERE $__dateFilter(date) AND user_email IN (${user_email:sqlstring}) AND client_type IN (${client_type:sqlstring})",
           "connectionArgs": {
             "region": "__default",
@@ -211,7 +211,7 @@
       "targets": [
         {
           "refId": "A",
-          "format": 0,
+          "format": 1,
           "rawSQL": "SELECT sum(credits_used) AS fleet_credits FROM usage_daily WHERE $__dateFilter(date) AND user_email IN (${user_email:sqlstring}) AND client_type IN (${client_type:sqlstring})",
           "connectionArgs": {
             "region": "__default",
@@ -261,7 +261,7 @@
       "targets": [
         {
           "refId": "A",
-          "format": 0,
+          "format": 1,
           "rawSQL": "SELECT sum(total_messages) AS fleet_messages FROM usage_daily WHERE $__dateFilter(date) AND user_email IN (${user_email:sqlstring}) AND client_type IN (${client_type:sqlstring})",
           "connectionArgs": {
             "region": "__default",
@@ -310,8 +310,8 @@
       "targets": [
         {
           "refId": "A",
-          "format": 0,
-          "rawSQL": "SELECT count(*) AS users_near_cap FROM (SELECT user_email, sum(credits_used) / max(overage_cap) AS utilisation FROM usage_daily WHERE date >= CAST(date_trunc('month', current_date) AS date) AND user_email IN (${user_email:sqlstring}) AND client_type IN (${client_type:sqlstring}) GROUP BY user_email HAVING sum(credits_used) / max(overage_cap) >= 0.9)",
+          "format": 1,
+          "rawSQL": "SELECT count(*) AS users_near_cap FROM (SELECT user_email, sum(credits_used) / NULLIF(max(overage_cap), 0) AS utilisation FROM usage_daily WHERE date >= CAST(date_trunc('month', current_date) AS date) AND user_email IN (${user_email:sqlstring}) AND client_type IN (${client_type:sqlstring}) GROUP BY user_email HAVING sum(credits_used) / NULLIF(max(overage_cap), 0) >= 0.9)",
           "connectionArgs": {
             "region": "__default",
             "catalog": "__default",
@@ -368,7 +368,7 @@
       "targets": [
         {
           "refId": "A",
-          "format": 0,
+          "format": 1,
           "rawSQL": "SELECT user_email, sum(credits_used) AS credits FROM usage_daily WHERE $__dateFilter(date) AND user_email IN (${user_email:sqlstring}) AND client_type IN (${client_type:sqlstring}) GROUP BY user_email ORDER BY 2 DESC",
           "connectionArgs": {
             "region": "__default",
@@ -410,7 +410,7 @@
       "targets": [
         {
           "refId": "A",
-          "format": 0,
+          "format": 1,
           "rawSQL": "SELECT user_email, sum(total_messages) AS messages FROM usage_daily WHERE $__dateFilter(date) AND user_email IN (${user_email:sqlstring}) AND client_type IN (${client_type:sqlstring}) GROUP BY user_email ORDER BY 2 DESC",
           "connectionArgs": {
             "region": "__default",
@@ -451,8 +451,8 @@
       "targets": [
         {
           "refId": "A",
-          "format": 0,
-          "rawSQL": "SELECT user_email, sum(credits_used) AS mtd_credits, max(overage_cap) AS cap, cast(sum(credits_used) / max(overage_cap) * 100 AS decimal(5,1)) AS utilisation_pct FROM usage_daily WHERE date >= CAST(date_trunc('month', current_date) AS date) AND user_email IN (${user_email:sqlstring}) AND client_type IN (${client_type:sqlstring}) GROUP BY user_email ORDER BY 4 DESC",
+          "format": 1,
+          "rawSQL": "SELECT user_email, sum(credits_used) AS mtd_credits, max(overage_cap) AS cap, cast(sum(credits_used) / NULLIF(max(overage_cap), 0) * 100 AS decimal(5,1)) AS utilisation_pct FROM usage_daily WHERE date >= CAST(date_trunc('month', current_date) AS date) AND user_email IN (${user_email:sqlstring}) AND client_type IN (${client_type:sqlstring}) GROUP BY user_email ORDER BY 4 DESC",
           "connectionArgs": {
             "region": "__default",
             "catalog": "__default",
@@ -570,8 +570,8 @@
       "targets": [
         {
           "refId": "A",
-          "format": 0,
-          "rawSQL": "SELECT user_email, sum(credits_used) / max(overage_cap) * 100 AS utilisation_pct FROM usage_daily WHERE date >= CAST(date_trunc('month', current_date) AS date) AND user_email IN (${user_email:sqlstring}) AND client_type IN (${client_type:sqlstring}) GROUP BY user_email ORDER BY 2 DESC",
+          "format": 1,
+          "rawSQL": "SELECT user_email, sum(credits_used) / NULLIF(max(overage_cap), 0) * 100 AS utilisation_pct FROM usage_daily WHERE date >= CAST(date_trunc('month', current_date) AS date) AND user_email IN (${user_email:sqlstring}) AND client_type IN (${client_type:sqlstring}) GROUP BY user_email ORDER BY 2 DESC",
           "connectionArgs": {
             "region": "__default",
             "catalog": "__default",
@@ -632,7 +632,7 @@
       "targets": [
         {
           "refId": "A",
-          "format": 0,
+          "format": 1,
           "rawSQL": "SELECT subscription_tier, count(distinct user_email) AS users FROM usage_daily WHERE $__dateFilter(date) AND user_email IN (${user_email:sqlstring}) AND client_type IN (${client_type:sqlstring}) GROUP BY subscription_tier",
           "connectionArgs": {
             "region": "__default",
@@ -679,7 +679,7 @@
       "targets": [
         {
           "refId": "A",
-          "format": 1,
+          "format": 0,
           "rawSQL": "SELECT CAST(date AS timestamp) AS time, sum(credits_used) AS fleet_credits FROM usage_daily WHERE $__dateFilter(date) AND user_email IN (${user_email:sqlstring}) AND client_type IN (${client_type:sqlstring}) GROUP BY date ORDER BY 1",
           "connectionArgs": {
             "region": "__default",
@@ -725,7 +725,7 @@
       "targets": [
         {
           "refId": "A",
-          "format": 0,
+          "format": 1,
           "rawSQL": "SELECT model, sum(messages) AS total_messages FROM model_messages WHERE $__dateFilter(date) AND user_email IN (${user_email:sqlstring}) AND client_type IN (${client_type:sqlstring}) AND model IN (${model:sqlstring}) GROUP BY model ORDER BY 2 DESC",
           "connectionArgs": {
             "region": "__default",
@@ -766,7 +766,7 @@
       "targets": [
         {
           "refId": "A",
-          "format": 0,
+          "format": 1,
           "rawSQL": "SELECT client_type, sum(total_messages) AS messages FROM usage_daily WHERE $__dateFilter(date) AND user_email IN (${user_email:sqlstring}) AND client_type IN (${client_type:sqlstring}) GROUP BY client_type",
           "connectionArgs": {
             "region": "__default",
