@@ -212,7 +212,7 @@
         {
           "refId": "A",
           "format": 1,
-          "rawSQL": "SELECT sum(credits_used) AS fleet_credits FROM usage_daily WHERE $__dateFilter(date) AND user_email IN (${user_email:sqlstring}) AND client_type IN (${client_type:sqlstring})",
+          "rawSQL": "SELECT sum(credits_used) AS fleet_credits FROM usage_daily WHERE date >= CAST(date_trunc('month', current_date) AS date) AND user_email IN (${user_email:sqlstring}) AND client_type IN (${client_type:sqlstring})",
           "connectionArgs": {
             "region": "__default",
             "catalog": "__default",
