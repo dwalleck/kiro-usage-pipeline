@@ -162,7 +162,12 @@
         {
           "refId": "A",
           "format": 0,
-          "rawSQL": "SELECT sum(credits_used) AS total_credits FROM usage_daily WHERE $__dateFilter(date) AND user_email = ${user_email:sqlstring} AND client_type IN (${client_type:sqlstring})"
+          "rawSQL": "SELECT sum(credits_used) AS total_credits FROM usage_daily WHERE $__dateFilter(date) AND user_email = ${user_email:sqlstring} AND client_type IN (${client_type:sqlstring})",
+          "connectionArgs": {
+            "region": "__default",
+            "catalog": "__default",
+            "database": "__default"
+          }
         }
       ],
       "options": {
@@ -207,7 +212,12 @@
         {
           "refId": "A",
           "format": 0,
-          "rawSQL": "SELECT sum(total_messages) AS total_messages FROM usage_daily WHERE $__dateFilter(date) AND user_email = ${user_email:sqlstring} AND client_type IN (${client_type:sqlstring})"
+          "rawSQL": "SELECT sum(total_messages) AS total_messages FROM usage_daily WHERE $__dateFilter(date) AND user_email = ${user_email:sqlstring} AND client_type IN (${client_type:sqlstring})",
+          "connectionArgs": {
+            "region": "__default",
+            "catalog": "__default",
+            "database": "__default"
+          }
         }
       ],
       "options": {
@@ -251,7 +261,12 @@
         {
           "refId": "A",
           "format": 0,
-          "rawSQL": "SELECT max(subscription_tier) AS tier FROM usage_daily WHERE $__dateFilter(date) AND user_email = ${user_email:sqlstring} AND client_type IN (${client_type:sqlstring})"
+          "rawSQL": "SELECT max(subscription_tier) AS tier FROM usage_daily WHERE $__dateFilter(date) AND user_email = ${user_email:sqlstring} AND client_type IN (${client_type:sqlstring})",
+          "connectionArgs": {
+            "region": "__default",
+            "catalog": "__default",
+            "database": "__default"
+          }
         }
       ],
       "options": {
@@ -294,7 +309,12 @@
         {
           "refId": "A",
           "format": 0,
-          "rawSQL": "SELECT count(distinct model) AS model_count FROM model_messages WHERE $__dateFilter(date) AND user_email = ${user_email:sqlstring} AND client_type IN (${client_type:sqlstring}) AND model IN (${model:sqlstring})"
+          "rawSQL": "SELECT count(distinct model) AS model_count FROM model_messages WHERE $__dateFilter(date) AND user_email = ${user_email:sqlstring} AND client_type IN (${client_type:sqlstring}) AND model IN (${model:sqlstring})",
+          "connectionArgs": {
+            "region": "__default",
+            "catalog": "__default",
+            "database": "__default"
+          }
         }
       ],
       "options": {
@@ -338,7 +358,12 @@
         {
           "refId": "A",
           "format": 1,
-          "rawSQL": "SELECT CAST(date AS timestamp) AS time, model, sum(messages) AS messages FROM model_messages WHERE $__dateFilter(date) AND user_email = ${user_email:sqlstring} AND client_type IN (${client_type:sqlstring}) AND model IN (${model:sqlstring}) GROUP BY date, model ORDER BY 1, 3 DESC"
+          "rawSQL": "SELECT CAST(date AS timestamp) AS time, model, sum(messages) AS messages FROM model_messages WHERE $__dateFilter(date) AND user_email = ${user_email:sqlstring} AND client_type IN (${client_type:sqlstring}) AND model IN (${model:sqlstring}) GROUP BY date, model ORDER BY 1, 3 DESC",
+          "connectionArgs": {
+            "region": "__default",
+            "catalog": "__default",
+            "database": "__default"
+          }
         }
       ],
       "options": {
@@ -392,7 +417,12 @@
         {
           "refId": "A",
           "format": 0,
-          "rawSQL": "SELECT model, sum(messages) AS messages FROM model_messages WHERE $__dateFilter(date) AND user_email = ${user_email:sqlstring} AND client_type IN (${client_type:sqlstring}) AND model IN (${model:sqlstring}) GROUP BY model ORDER BY 2 DESC"
+          "rawSQL": "SELECT model, sum(messages) AS messages FROM model_messages WHERE $__dateFilter(date) AND user_email = ${user_email:sqlstring} AND client_type IN (${client_type:sqlstring}) AND model IN (${model:sqlstring}) GROUP BY model ORDER BY 2 DESC",
+          "connectionArgs": {
+            "region": "__default",
+            "catalog": "__default",
+            "database": "__default"
+          }
         }
       ],
       "options": {
@@ -434,12 +464,22 @@
         {
           "refId": "credits",
           "format": 1,
-          "rawSQL": "SELECT CAST(date AS timestamp) AS time, sum(credits_used) AS credits FROM usage_daily WHERE $__dateFilter(date) AND user_email = ${user_email:sqlstring} AND client_type IN (${client_type:sqlstring}) GROUP BY date ORDER BY 1"
+          "rawSQL": "SELECT CAST(date AS timestamp) AS time, sum(credits_used) AS credits FROM usage_daily WHERE $__dateFilter(date) AND user_email = ${user_email:sqlstring} AND client_type IN (${client_type:sqlstring}) GROUP BY date ORDER BY 1",
+          "connectionArgs": {
+            "region": "__default",
+            "catalog": "__default",
+            "database": "__default"
+          }
         },
         {
           "refId": "messages",
           "format": 1,
-          "rawSQL": "SELECT CAST(date AS timestamp) AS time, sum(total_messages) AS messages FROM usage_daily WHERE $__dateFilter(date) AND user_email = ${user_email:sqlstring} AND client_type IN (${client_type:sqlstring}) GROUP BY date ORDER BY 1"
+          "rawSQL": "SELECT CAST(date AS timestamp) AS time, sum(total_messages) AS messages FROM usage_daily WHERE $__dateFilter(date) AND user_email = ${user_email:sqlstring} AND client_type IN (${client_type:sqlstring}) GROUP BY date ORDER BY 1",
+          "connectionArgs": {
+            "region": "__default",
+            "catalog": "__default",
+            "database": "__default"
+          }
         }
       ],
       "options": {
@@ -509,7 +549,12 @@
         {
           "refId": "A",
           "format": 0,
-          "rawSQL": "SELECT sum(credits_used) AS mtd_credits, max(overage_cap) AS cap, cast(sum(credits_used) / max(overage_cap) * 100 AS decimal(5,1)) AS utilisation_pct FROM usage_daily WHERE date >= CAST(date_trunc('month', current_date) AS date) AND user_email = ${user_email:sqlstring} AND client_type IN (${client_type:sqlstring})"
+          "rawSQL": "SELECT sum(credits_used) AS mtd_credits, max(overage_cap) AS cap, cast(sum(credits_used) / max(overage_cap) * 100 AS decimal(5,1)) AS utilisation_pct FROM usage_daily WHERE date >= CAST(date_trunc('month', current_date) AS date) AND user_email = ${user_email:sqlstring} AND client_type IN (${client_type:sqlstring})",
+          "connectionArgs": {
+            "region": "__default",
+            "catalog": "__default",
+            "database": "__default"
+          }
         }
       ],
       "options": {
@@ -598,7 +643,12 @@
         {
           "refId": "A",
           "format": 1,
-          "rawSQL": "SELECT date, client_type, credits_used, overage_credits_used, total_messages, chat_conversations, overage_enabled, new_user FROM usage_daily WHERE $__dateFilter(date) AND user_email = ${user_email:sqlstring} AND client_type IN (${client_type:sqlstring}) ORDER BY date DESC, client_type"
+          "rawSQL": "SELECT date, client_type, credits_used, overage_credits_used, total_messages, chat_conversations, overage_enabled, new_user FROM usage_daily WHERE $__dateFilter(date) AND user_email = ${user_email:sqlstring} AND client_type IN (${client_type:sqlstring}) ORDER BY date DESC, client_type",
+          "connectionArgs": {
+            "region": "__default",
+            "catalog": "__default",
+            "database": "__default"
+          }
         }
       ],
       "options": {
