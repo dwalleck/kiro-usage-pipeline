@@ -132,12 +132,12 @@ public class IngestServiceTests
     }
 
     [Test]
-    public async Task ProcessCsv_ValidCsv_WritesBothFactsWithSourceIdentity()
+    public async Task ProcessCsvAsync_ValidCsv_WritesBothFactsWithSourceIdentity()
     {
         var s3 = CreateS3Mock();
         var service = CreateService(s3, CreateSsmMock(TargetEmail));
 
-        await service.ProcessCsv(RawBucket, "reports/KIRO_CLI_20260710.csv");
+        await service.ProcessCsvAsync(RawBucket, "reports/KIRO_CLI_20260710.csv");
 
         s3.Verify(client => client.PutObjectAsync(
             It.Is<PutObjectRequest>(request =>
@@ -151,7 +151,7 @@ public class IngestServiceTests
     }
 
     [Test]
-    public async Task ProcessCsv_TwoInvocations_RefreshesTargetListEachTime()
+    public async Task ProcessCsvAsync_TwoInvocations_RefreshesTargetListEachTime()
     {
         var s3 = CreateS3Mock();
         var ssm = new Mock<IAmazonSimpleSystemsManagement>();
@@ -162,8 +162,8 @@ public class IngestServiceTests
             .ReturnsAsync(new GetParameterResponse { Parameter = new Parameter { Value = "removed@example.com" } });
         var service = CreateService(s3, ssm);
 
-        await service.ProcessCsv(RawBucket, "a.csv");
-        await service.ProcessCsv(RawBucket, "b.csv");
+        await service.ProcessCsvAsync(RawBucket, "a.csv");
+        await service.ProcessCsvAsync(RawBucket, "b.csv");
 
         ssm.Verify(client => client.GetParameterAsync(
             It.IsAny<GetParameterRequest>(),
@@ -171,7 +171,7 @@ public class IngestServiceTests
     }
 
     [Test]
-    public async Task ProcessCsv_NoLongerProducesRows_DeletesExistingOutputs()
+    public async Task ProcessCsvAsync_NoLongerProducesRows_DeletesExistingOutputs()
     {
         var s3 = CreateS3Mock();
         s3.Setup(client => client.ListObjectsV2Async(
@@ -188,7 +188,7 @@ public class IngestServiceTests
             });
         var service = CreateService(s3, CreateSsmMock("someone-else@example.com"));
 
-        await service.ProcessCsv(RawBucket, "reports/report.csv");
+        await service.ProcessCsvAsync(RawBucket, "reports/report.csv");
 
         s3.Verify(client => client.DeleteObjectAsync(
             It.IsAny<DeleteObjectRequest>(),
@@ -199,7 +199,7 @@ public class IngestServiceTests
     }
 
     [Test]
-    public async Task ProcessCsv_SecondFactWriteFails_RemovesAllSourceOutputs()
+    public async Task ProcessCsvAsync_SecondFactWriteFails_RemovesAllSourceOutputs()
     {
         var s3 = CreateS3Mock();
         s3.SetupSequence(client => client.PutObjectAsync(
@@ -209,7 +209,7 @@ public class IngestServiceTests
             .ThrowsAsync(new AmazonS3Exception("write failed"));
         var service = CreateService(s3, CreateSsmMock(TargetEmail));
 
-        await Assert.That(() => service.ProcessCsv(RawBucket, "report.csv"))
+        await Assert.That(() => service.ProcessCsvAsync(RawBucket, "report.csv"))
             .Throws<AmazonS3Exception>();
 
         s3.Verify(client => client.DeleteObjectAsync(
@@ -218,7 +218,7 @@ public class IngestServiceTests
     }
 
     [Test]
-    public async Task ProcessCsv_WriteFailsAfterExistingOutputsFound_FailsClosedByDeletingGeneration()
+    public async Task ProcessCsvAsync_WriteFailsAfterExistingOutputsFound_FailsClosedByDeletingGeneration()
     {
         var s3 = CreateS3Mock();
         s3.Setup(client => client.ListObjectsV2Async(
@@ -240,7 +240,7 @@ public class IngestServiceTests
             .ThrowsAsync(new AmazonS3Exception("write failed"));
         var service = CreateService(s3, CreateSsmMock(TargetEmail));
 
-        await Assert.That(() => service.ProcessCsv(RawBucket, "reports/report.csv"))
+        await Assert.That(() => service.ProcessCsvAsync(RawBucket, "reports/report.csv"))
             .Throws<AmazonS3Exception>();
 
         s3.Verify(client => client.DeleteObjectAsync(
@@ -249,7 +249,7 @@ public class IngestServiceTests
     }
 
     [Test]
-    public async Task ProcessCsv_AnalyticsListingTruncatedWithoutToken_ThrowsBeforePublishing()
+    public async Task ProcessCsvAsync_AnalyticsListingTruncatedWithoutToken_ThrowsBeforePublishing()
     {
         var s3 = CreateS3Mock();
         s3.Setup(client => client.ListObjectsV2Async(
@@ -263,7 +263,7 @@ public class IngestServiceTests
             });
         var service = CreateService(s3, CreateSsmMock(TargetEmail));
 
-        await Assert.That(() => service.ProcessCsv(RawBucket, "report.csv"))
+        await Assert.That(() => service.ProcessCsvAsync(RawBucket, "report.csv"))
             .Throws<InvalidOperationException>();
 
         s3.Verify(client => client.PutObjectAsync(
@@ -275,12 +275,12 @@ public class IngestServiceTests
     }
 
     [Test]
-    public async Task ProcessCsv_VersionedSource_ReadsNotifiedVersion()
+    public async Task ProcessCsvAsync_VersionedSource_ReadsNotifiedVersion()
     {
         var s3 = CreateS3Mock();
         var service = CreateService(s3, CreateSsmMock(TargetEmail));
 
-        await service.ProcessCsv(new IngestSource(RawBucket, "report.csv", "version-7", "0A"));
+        await service.ProcessCsvAsync(new IngestSource(RawBucket, "report.csv", "version-7", "0A"));
 
         s3.Verify(client => client.GetObjectAsync(
             It.Is<GetObjectRequest>(request =>
@@ -291,7 +291,7 @@ public class IngestServiceTests
     }
 
     [Test]
-    public async Task ProcessCsv_SequencerStateWriteFails_PreservesCompleteGeneration()
+    public async Task ProcessCsvAsync_SequencerStateWriteFails_PreservesCompleteGeneration()
     {
         var s3 = CreateS3Mock();
         s3.Setup(client => client.PutObjectAsync(
@@ -300,7 +300,7 @@ public class IngestServiceTests
             .ThrowsAsync(new AmazonS3Exception("state timeout"));
         var service = CreateService(s3, CreateSsmMock(TargetEmail));
 
-        await Assert.That(() => service.ProcessCsv(new IngestSource(
+        await Assert.That(() => service.ProcessCsvAsync(new IngestSource(
                 RawBucket,
                 "report.csv",
                 "version-1",
@@ -316,12 +316,12 @@ public class IngestServiceTests
     }
 
     [Test]
-    public async Task ProcessCsv_OlderSequencer_SkipsWithoutReadingRawObject()
+    public async Task ProcessCsvAsync_OlderSequencer_SkipsWithoutReadingRawObject()
     {
         var s3 = CreateS3Mock(savedSequencer: "0A");
         var service = CreateService(s3, CreateSsmMock(TargetEmail));
 
-        await service.ProcessCsv(new IngestSource(RawBucket, "report.csv", "version-1", "09"));
+        await service.ProcessCsvAsync(new IngestSource(RawBucket, "report.csv", "version-1", "09"));
 
         s3.Verify(client => client.GetObjectAsync(
             It.Is<GetObjectRequest>(request => request.BucketName == RawBucket),
@@ -329,7 +329,7 @@ public class IngestServiceTests
     }
 
     [Test]
-    public async Task ProcessCsv_ReportDateDiffersFromKeyDate_WarnsAndStillWrites()
+    public async Task ProcessCsvAsync_ReportDateDiffersFromKeyDate_WarnsAndStillWrites()
     {
         var key = BackfillKey("2026-07-09", "KIRO_CLI_mismatch");
         var s3 = CreateS3Mock();
@@ -338,7 +338,7 @@ public class IngestServiceTests
         var context = new Mock<ILambdaContext>();
         context.Setup(value => value.Logger).Returns(logger.Object);
 
-        await service.ProcessCsv(new IngestSource(RawBucket, key), context.Object);
+        await service.ProcessCsvAsync(new IngestSource(RawBucket, key), context.Object);
 
         logger.Verify(value => value.LogWarning(It.Is<string>(message =>
             message.Contains("\"event\":\"ingest_date_mismatch\"", StringComparison.Ordinal) &&
@@ -374,14 +374,14 @@ public class IngestServiceTests
     }
 
     [Test]
-    public async Task ProcessCsv_WithContext_LogsStructuredCounts()
+    public async Task ProcessCsvAsync_WithContext_LogsStructuredCounts()
     {
         var service = CreateService(CreateS3Mock(), CreateSsmMock(TargetEmail));
         var logger = new Mock<ILambdaLogger>();
         var context = new Mock<ILambdaContext>();
         context.Setup(value => value.Logger).Returns(logger.Object);
 
-        await service.ProcessCsv(RawBucket, "report.csv", context.Object);
+        await service.ProcessCsvAsync(RawBucket, "report.csv", context.Object);
 
         logger.Verify(value => value.LogInformation(It.Is<string>(message =>
             message.Contains("\"event\":\"ingest_complete\"", StringComparison.Ordinal) &&
@@ -392,7 +392,7 @@ public class IngestServiceTests
     }
 
     [Test]
-    public async Task ProcessCsv_MalformedReport_LogsStructuredErrorAndThrows()
+    public async Task ProcessCsvAsync_MalformedReport_LogsStructuredErrorAndThrows()
     {
         var malformed = "Date,User_Email\n2026-07-10,dwalleck@proton.me";
         var service = CreateService(CreateS3Mock(_ => malformed), CreateSsmMock(TargetEmail));
@@ -400,7 +400,7 @@ public class IngestServiceTests
         var context = new Mock<ILambdaContext>();
         context.Setup(value => value.Logger).Returns(logger.Object);
 
-        await Assert.That(() => service.ProcessCsv(RawBucket, "bad.csv", context.Object))
+        await Assert.That(() => service.ProcessCsvAsync(RawBucket, "bad.csv", context.Object))
             .Throws<InvalidDataException>();
 
         logger.Verify(value => value.LogError(It.Is<string>(message =>

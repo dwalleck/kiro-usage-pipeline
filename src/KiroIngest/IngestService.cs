@@ -44,10 +44,10 @@ public sealed class IngestService : IIngestService
         _rawPrefix = rawPrefix;
     }
 
-    public Task ProcessCsv(string bucket, string key, ILambdaContext? context = null) =>
-        ProcessCsv(new IngestSource(bucket, key), context);
+    public Task ProcessCsvAsync(string bucket, string key, ILambdaContext? context = null) =>
+        ProcessCsvAsync(new IngestSource(bucket, key), context);
 
-    public async Task ProcessCsv(IngestSource source, ILambdaContext? context = null)
+    public async Task ProcessCsvAsync(IngestSource source, ILambdaContext? context = null)
     {
         var preparedOutputs = new List<PreparedOutput>();
         var attemptedOutputKeys = new List<string>();
@@ -165,13 +165,7 @@ public sealed class IngestService : IIngestService
             ContinuationToken = continuationToken,
         });
 
-        var nextContinuationToken = response.IsTruncated == true
-            ? response.NextContinuationToken
-            : null;
-        if (response.IsTruncated == true && string.IsNullOrWhiteSpace(nextContinuationToken))
-        {
-            throw new InvalidOperationException("S3 returned a truncated backfill page without a continuation token");
-        }
+        var nextContinuationToken = RequireContinuationToken(response, "backfill page");
 
         if (nextContinuationToken is not null)
         {
@@ -213,7 +207,7 @@ public sealed class IngestService : IIngestService
             processed++;
             try
             {
-                await ProcessCsv(new IngestSource(_rawBucket, obj.Key), context);
+                await ProcessCsvAsync(new IngestSource(_rawBucket, obj.Key), context);
             }
             catch (Exception ex)
             {
@@ -309,14 +303,7 @@ public sealed class IngestService : IIngestService
                     }
                 }
 
-                continuationToken = response.IsTruncated == true
-                    ? response.NextContinuationToken
-                    : null;
-                if (response.IsTruncated == true && string.IsNullOrWhiteSpace(continuationToken))
-                {
-                    throw new InvalidOperationException(
-                        "S3 returned a truncated analytics listing without a continuation token");
-                }
+                continuationToken = RequireContinuationToken(response, "analytics listing");
             }
             while (continuationToken is not null);
         }
@@ -380,6 +367,24 @@ public sealed class IngestService : IIngestService
         return lengthComparison != 0
             ? lengthComparison
             : string.Compare(normalizedLeft, normalizedRight, StringComparison.OrdinalIgnoreCase);
+    }
+
+    // The SDK's IsTruncated is a nullable bool; a truncated page must always carry a
+    // token, otherwise pagination would silently drop the remaining objects.
+    private static string? RequireContinuationToken(ListObjectsV2Response response, string listingDescription)
+    {
+        if (response.IsTruncated != true)
+        {
+            return null;
+        }
+
+        if (string.IsNullOrWhiteSpace(response.NextContinuationToken))
+        {
+            throw new InvalidOperationException(
+                $"S3 returned a truncated {listingDescription} without a continuation token");
+        }
+
+        return response.NextContinuationToken;
     }
 
     private static string StateKey(IngestSource source) =>

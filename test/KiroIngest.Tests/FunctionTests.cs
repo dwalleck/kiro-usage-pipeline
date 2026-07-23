@@ -54,7 +54,7 @@ public class FunctionTests
             ToStream(AwsS3EventJson(("my-bucket", "path/to+report.csv", "version-1", "000A"))),
             context);
 
-        mock.Verify(service => service.ProcessCsv(
+        mock.Verify(service => service.ProcessCsvAsync(
             It.Is<IngestSource>(source =>
                 source.Bucket == "my-bucket" &&
                 source.Key == "path/to report.csv" &&
@@ -74,10 +74,10 @@ public class FunctionTests
             ToStream(AwsS3EventJson(("b1", "k1", null, "1"), ("b2", "k2", null, "2"))),
             context);
 
-        mock.Verify(service => service.ProcessCsv(
+        mock.Verify(service => service.ProcessCsvAsync(
             It.Is<IngestSource>(source => source.Bucket == "b1" && source.Key == "k1"),
             context), Times.Once);
-        mock.Verify(service => service.ProcessCsv(
+        mock.Verify(service => service.ProcessCsvAsync(
             It.Is<IngestSource>(source => source.Bucket == "b2" && source.Key == "k2"),
             context), Times.Once);
     }
@@ -87,7 +87,7 @@ public class FunctionTests
     {
         var mock = new Mock<IIngestService>();
         var context = CreateContext();
-        mock.Setup(service => service.ProcessCsv(
+        mock.Setup(service => service.ProcessCsvAsync(
                 It.Is<IngestSource>(source => source.Key == "bad.csv"),
                 context))
             .ThrowsAsync(new InvalidDataException("bad report"));
@@ -98,7 +98,7 @@ public class FunctionTests
                 context))
             .Throws<AggregateException>();
 
-        mock.Verify(service => service.ProcessCsv(
+        mock.Verify(service => service.ProcessCsvAsync(
             It.Is<IngestSource>(source => source.Key == "good.csv"),
             context), Times.Once);
     }
@@ -113,7 +113,7 @@ public class FunctionTests
         await function.HandleAsync(ToStream(BackfillJson()), context);
 
         mock.Verify(service => service.ProcessBackfillAsync(null, null, context, null), Times.Once);
-        mock.Verify(service => service.ProcessCsv(
+        mock.Verify(service => service.ProcessCsvAsync(
             It.IsAny<IngestSource>(),
             It.IsAny<ILambdaContext?>()), Times.Never);
     }
@@ -192,7 +192,7 @@ public class FunctionTests
                 CreateContext()))
             .Throws<AggregateException>();
 
-        ingest.Verify(service => service.ProcessCsv(
+        ingest.Verify(service => service.ProcessCsvAsync(
             It.IsAny<IngestSource>(),
             It.IsAny<ILambdaContext?>()), Times.Never);
     }

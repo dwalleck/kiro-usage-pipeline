@@ -7,7 +7,7 @@ namespace KiroIngest;
 // Polymorphic handler: dispatches on event shape.
 //   S3 ObjectCreated notification → live path (process each key)
 //   {"mode":"backfill", "from":?, "to":?} → backfill path
-// Both converge on ProcessCsv so the transform + Target List filter are identical.
+// Both converge on ProcessCsvAsync so the transform + Target List filter are identical.
 public sealed class Function
 {
     private static readonly JsonSerializerOptions EventJsonOptions = new()
@@ -112,7 +112,7 @@ public sealed class Function
                     objectEntity.KeyDecoded,
                     objectEntity.VersionId,
                     objectEntity.Sequencer);
-                await _ingest.ProcessCsv(source, context);
+                await _ingest.ProcessCsvAsync(source, context);
             }
             catch (Exception ex)
             {

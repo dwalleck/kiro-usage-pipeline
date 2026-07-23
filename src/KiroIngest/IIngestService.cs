@@ -6,7 +6,7 @@ namespace KiroIngest;
 // code uses IngestService through IngestServiceFactory.
 public interface IIngestService
 {
-    Task ProcessCsv(IngestSource source, ILambdaContext? context = null);
+    Task ProcessCsvAsync(IngestSource source, ILambdaContext? context = null);
 
     // Backfill: list all .csv objects under the raw prefix and process each one
     // sequentially. from/to are optional DateOnly bounds (default unbounded).
