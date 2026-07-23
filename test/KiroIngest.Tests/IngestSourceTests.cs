@@ -21,14 +21,4 @@ public class IngestSourceTests
             .Throws<ArgumentException>();
     }
 
-    [Test]
-    public async Task Constructor_LiveSequencerAndBackfillDate_Throws()
-    {
-        await Assert.That(() => new IngestSource(
-                "bucket",
-                "key.csv",
-                sequencer: "01",
-                expectedDate: new DateOnly(2026, 7, 10)))
-            .Throws<ArgumentException>();
-    }
 }

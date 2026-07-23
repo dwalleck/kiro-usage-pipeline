@@ -38,36 +38,26 @@ public sealed record IngestSource
         string bucket,
         string key,
         string? versionId = null,
-        string? sequencer = null,
-        DateOnly? expectedDate = null)
+        string? sequencer = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(bucket);
         ArgumentException.ThrowIfNullOrWhiteSpace(key);
-        if (sequencer is not null)
+        if (sequencer is not null &&
+            (string.IsNullOrWhiteSpace(sequencer) || !sequencer.All(Uri.IsHexDigit)))
         {
-            if (string.IsNullOrWhiteSpace(sequencer) || !sequencer.All(Uri.IsHexDigit))
-            {
-                throw new ArgumentException("S3 event sequencer must be a non-empty hexadecimal string", nameof(sequencer));
-            }
-
-            if (expectedDate is not null)
-            {
-                throw new ArgumentException("Live sequencer and backfill expected date are mutually exclusive");
-            }
+            throw new ArgumentException("S3 event sequencer must be a non-empty hexadecimal string", nameof(sequencer));
         }
 
         Bucket = bucket;
         Key = key;
         VersionId = versionId;
         Sequencer = sequencer;
-        ExpectedDate = expectedDate;
     }
 
     public string Bucket { get; }
     public string Key { get; }
     public string? VersionId { get; }
     public string? Sequencer { get; }
-    public DateOnly? ExpectedDate { get; }
 }
 
 // Result of the CSV-to-facts transform, carrying row-count metadata so the

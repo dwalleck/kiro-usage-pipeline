@@ -69,7 +69,7 @@ public sealed class IngestService : IIngestService
             var csv = await ReadObjectTextAsync(source);
             var targetList = await GetTargetListAsync();
             var result = ReportTransform.Transform(csv, targetList);
-            ValidateExpectedDate(source, result);
+            WarnOnKeyDateMismatch(source, result, context);
 
             preparedOutputs.AddRange(await PrepareOutputsAsync(source, result));
             existingOutputKeys = await FindExistingOutputKeysAsync(source);
@@ -213,10 +213,7 @@ public sealed class IngestService : IIngestService
             processed++;
             try
             {
-                await ProcessCsv(new IngestSource(
-                    _rawBucket,
-                    obj.Key,
-                    expectedDate: keyDate), context);
+                await ProcessCsv(new IngestSource(_rawBucket, obj.Key), context);
             }
             catch (Exception ex)
             {
@@ -388,18 +385,36 @@ public sealed class IngestService : IIngestService
     private static string StateKey(IngestSource source) =>
         $"{StatePrefix}/{ReportTransform.SourceId(source.Bucket, source.Key)}.json";
 
-    private static void ValidateExpectedDate(IngestSource source, TransformResult result)
+    // Body dates are authoritative for partitioning; the key-path date is only
+    // addressing. A mismatch is a Kiro anomaly worth surfacing, but it must not fail
+    // the object — live and backfill deliberately treat it identically (spec §6).
+    private static void WarnOnKeyDateMismatch(
+        IngestSource source,
+        TransformResult result,
+        ILambdaContext? context)
     {
-        if (source.ExpectedDate is null)
+        var keyDate = ExtractDateFromKey(source.Key);
+        if (keyDate is null)
         {
             return;
         }
 
-        var expected = source.ExpectedDate.Value.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
-        if (result.Partitions.Any(partition => !string.Equals(partition.Date, expected, StringComparison.Ordinal)))
+        var expected = keyDate.Value.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
+        var mismatched = result.Partitions
+            .Select(partition => partition.Date)
+            .Where(date => !string.Equals(date, expected, StringComparison.Ordinal))
+            .Distinct(StringComparer.Ordinal)
+            .Order(StringComparer.Ordinal)
+            .ToArray();
+        if (mismatched.Length > 0)
         {
-            throw new InvalidDataException(
-                $"Report date does not match source key date {expected}: {source.Key}");
+            context?.Logger.LogWarning(JsonSerializer.Serialize(new
+            {
+                @event = "ingest_date_mismatch",
+                source,
+                key_date = expected,
+                report_dates = mismatched,
+            }));
         }
     }
 

@@ -329,15 +329,48 @@ public class IngestServiceTests
     }
 
     [Test]
-    public async Task ProcessCsv_ExpectedDateDiffersFromCsv_Throws()
+    public async Task ProcessCsv_ReportDateDiffersFromKeyDate_WarnsAndStillWrites()
     {
-        var service = CreateService(CreateS3Mock(), CreateSsmMock(TargetEmail));
+        var key = BackfillKey("2026-07-09", "KIRO_CLI_mismatch");
+        var s3 = CreateS3Mock();
+        var service = CreateService(s3, CreateSsmMock(TargetEmail));
+        var logger = new Mock<ILambdaLogger>();
+        var context = new Mock<ILambdaContext>();
+        context.Setup(value => value.Logger).Returns(logger.Object);
 
-        await Assert.That(() => service.ProcessCsv(new IngestSource(
-                RawBucket,
-                "report.csv",
-                expectedDate: new DateOnly(2026, 7, 9))))
-            .Throws<InvalidDataException>();
+        await service.ProcessCsv(new IngestSource(RawBucket, key), context.Object);
+
+        logger.Verify(value => value.LogWarning(It.Is<string>(message =>
+            message.Contains("\"event\":\"ingest_date_mismatch\"", StringComparison.Ordinal) &&
+            message.Contains("\"key_date\":\"2026-07-09\"", StringComparison.Ordinal) &&
+            message.Contains("\"report_dates\":[\"2026-07-10\"]", StringComparison.Ordinal))), Times.Once);
+        s3.Verify(client => client.PutObjectAsync(
+            It.Is<PutObjectRequest>(request => request.Key.StartsWith(
+                "usage_daily/date=2026-07-10/", StringComparison.Ordinal)),
+            It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Test]
+    public async Task ProcessBackfill_ReportDateDiffersFromKeyDate_ProcessesLikeLivePath()
+    {
+        var key = BackfillKey("2026-07-09", "KIRO_CLI_mismatch");
+        var s3 = CreateS3Mock();
+        s3.Setup(client => client.ListObjectsV2Async(
+                It.Is<ListObjectsV2Request>(request => request.BucketName == RawBucket),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new ListObjectsV2Response
+            {
+                S3Objects = [new S3Object { Key = key }],
+                IsTruncated = false,
+            });
+        var service = CreateService(s3, CreateSsmMock(TargetEmail));
+
+        await service.ProcessBackfillAsync(null, null);
+
+        s3.Verify(client => client.PutObjectAsync(
+            It.Is<PutObjectRequest>(request => request.Key.StartsWith(
+                "usage_daily/date=2026-07-10/", StringComparison.Ordinal)),
+            It.IsAny<CancellationToken>()), Times.Once);
     }
 
     [Test]
