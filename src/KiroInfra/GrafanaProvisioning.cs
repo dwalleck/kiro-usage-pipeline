@@ -141,6 +141,10 @@ namespace KiroInfra
             Resource.AddPropertyOverride("FleetDashboardAssetKey", fleetDashboard.S3ObjectKey);
             Resource.AddPropertyOverride("UserDrilldownDashboardAssetBucket", userDrilldownDashboard.S3BucketName);
             Resource.AddPropertyOverride("UserDrilldownDashboardAssetKey", userDrilldownDashboard.S3ObjectKey);
+            // The provider asserts each committed dashboard's uid against these before
+            // upserting, so the expected UIDs live in exactly one place: this construct.
+            Resource.AddPropertyOverride("FleetDashboardUid", FleetDashboardUid);
+            Resource.AddPropertyOverride("UserDrilldownDashboardUid", UserDrilldownDashboardUid);
 
             var invocationPermission = new CfnPermission(this, "AllowCloudFormationInvocation", new CfnPermissionProps
             {

@@ -22,8 +22,6 @@ public sealed class CustomResourceHandler
     private const string AthenaDataSourceUid = "kiro-athena";
     private const string AthenaDataSourceName = "Athena";
     private const string AthenaPluginId = "grafana-athena-datasource";
-    private const string FleetDashboardUid = "kiro-usage-fleet-overview";
-    private const string UserDrilldownDashboardUid = "kiro-usage-user-drilldown";
     private const string ServiceAccountName = "kiro-integration-spike-provisioner";
 
     private static readonly HttpClient Http = new()
@@ -115,14 +113,14 @@ public sealed class CustomResourceHandler
 
             var fleetDashboard = await ReadAssetAsync(s3, properties.FleetDashboardAssetBucket, properties.FleetDashboardAssetKey);
             var userDrilldownDashboard = await ReadAssetAsync(s3, properties.UserDrilldownDashboardAssetBucket, properties.UserDrilldownDashboardAssetKey);
-            await UpsertDashboardAsync(properties.WorkspaceEndpoint, tokenKey, fleetDashboard, FleetDashboardUid);
-            await UpsertDashboardAsync(properties.WorkspaceEndpoint, tokenKey, userDrilldownDashboard, UserDrilldownDashboardUid);
+            await UpsertDashboardAsync(properties.WorkspaceEndpoint, tokenKey, fleetDashboard, properties.FleetDashboardUid);
+            await UpsertDashboardAsync(properties.WorkspaceEndpoint, tokenKey, userDrilldownDashboard, properties.UserDrilldownDashboardUid);
 
             return new Dictionary<string, string>
             {
                 ["WorkspaceUrl"] = WorkspaceUrl(properties.WorkspaceEndpoint),
-                ["FleetOverviewUrl"] = $"{WorkspaceUrl(properties.WorkspaceEndpoint)}/d/{FleetDashboardUid}",
-                ["UserDrilldownUrl"] = $"{WorkspaceUrl(properties.WorkspaceEndpoint)}/d/{UserDrilldownDashboardUid}",
+                ["FleetOverviewUrl"] = $"{WorkspaceUrl(properties.WorkspaceEndpoint)}/d/{properties.FleetDashboardUid}",
+                ["UserDrilldownUrl"] = $"{WorkspaceUrl(properties.WorkspaceEndpoint)}/d/{properties.UserDrilldownDashboardUid}",
                 ["AthenaDataSourceUid"] = AthenaDataSourceUid,
                 ["FolderUid"] = FolderUid,
             };
@@ -236,7 +234,7 @@ public sealed class CustomResourceHandler
         {
             ["uid"] = AthenaDataSourceUid,
             ["name"] = AthenaDataSourceName,
-            ["type"] = "grafana-athena-datasource",
+            ["type"] = AthenaPluginId,
             ["access"] = "proxy",
             ["isDefault"] = true,
             ["jsonData"] = new Dictionary<string, object?>
@@ -481,7 +479,9 @@ public sealed class CustomResourceHandler
         string FleetDashboardAssetBucket,
         string FleetDashboardAssetKey,
         string UserDrilldownDashboardAssetBucket,
-        string UserDrilldownDashboardAssetKey)
+        string UserDrilldownDashboardAssetKey,
+        string FleetDashboardUid,
+        string UserDrilldownDashboardUid)
     {
         public static ProvisioningProperties From(JsonElement properties)
         {
@@ -498,7 +498,9 @@ public sealed class CustomResourceHandler
                 RequiredString(properties, nameof(FleetDashboardAssetBucket)),
                 RequiredString(properties, nameof(FleetDashboardAssetKey)),
                 RequiredString(properties, nameof(UserDrilldownDashboardAssetBucket)),
-                RequiredString(properties, nameof(UserDrilldownDashboardAssetKey)));
+                RequiredString(properties, nameof(UserDrilldownDashboardAssetKey)),
+                RequiredString(properties, nameof(FleetDashboardUid)),
+                RequiredString(properties, nameof(UserDrilldownDashboardUid)));
         }
     }
 }
