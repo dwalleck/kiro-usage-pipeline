@@ -91,13 +91,63 @@ namespace KiroInfra
                 },
             });
 
-            // Prefix-scoped raw reads; curated read/write for source-output
-            // reconciliation; ingest-state read/write for sequencer ordering; and Target
-            // List read. No Glue or Athena access.
-            rawBucket.GrantRead(Function, $"{userReportPrefix}*");
-            analyticsBucket.GrantReadWrite(Function, "usage_daily/*");
-            analyticsBucket.GrantReadWrite(Function, "model_messages/*");
-            analyticsBucket.GrantReadWrite(Function, "ingest-state/*");
+            // Spec §7.3 role, hand-rolled: the Grant helpers emit unconditioned s3:List*
+            // (plus s3:GetBucket*) on the whole bucket, so listing is scoped here with
+            // s3:prefix conditions instead. GetObjectVersion covers the version-pinned
+            // live reads on the versioned raw bucket. No Glue or Athena access.
+            Function.AddToRolePolicy(new PolicyStatement(new PolicyStatementProps
+            {
+                Effect = Effect.ALLOW,
+                Actions = ["s3:GetObject", "s3:GetObjectVersion"],
+                Resources = [rawBucket.ArnForObjects($"{userReportPrefix}*")],
+            }));
+            Function.AddToRolePolicy(new PolicyStatement(new PolicyStatementProps
+            {
+                Effect = Effect.ALLOW,
+                Actions = ["s3:ListBucket"],
+                Resources = [rawBucket.BucketArn],
+                Conditions = new Dictionary<string, object>
+                {
+                    ["StringLike"] = new Dictionary<string, object>
+                    {
+                        ["s3:prefix"] = $"{userReportPrefix}*",
+                    },
+                },
+            }));
+
+            // Curated facts + sequencer state: object read/write/delete for source-output
+            // reconciliation, with listing conditioned to the two fact prefixes the
+            // reconciler scans.
+            Function.AddToRolePolicy(new PolicyStatement(new PolicyStatementProps
+            {
+                Effect = Effect.ALLOW,
+                Actions = ["s3:GetObject", "s3:PutObject", "s3:DeleteObject"],
+                Resources =
+                [
+                    analyticsBucket.ArnForObjects("usage_daily/*"),
+                    analyticsBucket.ArnForObjects("model_messages/*"),
+                    analyticsBucket.ArnForObjects("ingest-state/*"),
+                ],
+            }));
+            Function.AddToRolePolicy(new PolicyStatement(new PolicyStatementProps
+            {
+                Effect = Effect.ALLOW,
+                Actions = ["s3:ListBucket"],
+                Resources = [analyticsBucket.BucketArn],
+                Conditions = new Dictionary<string, object>
+                {
+                    ["StringLike"] = new Dictionary<string, object>
+                    {
+                        ["s3:prefix"] = new[] { "usage_daily/*", "model_messages/*" },
+                    },
+                },
+            }));
+
+            // CMK path (spec §7.2): when UseCustomKey enables bucket keys, grant the
+            // additive KMS access the Grant helpers previously wired implicitly.
+            rawBucket.EncryptionKey?.GrantDecrypt(Function);
+            analyticsBucket.EncryptionKey?.GrantEncryptDecrypt(Function);
+
             targetList.GrantRead(Function);
             Function.AddToRolePolicy(new PolicyStatement(new PolicyStatementProps
             {
