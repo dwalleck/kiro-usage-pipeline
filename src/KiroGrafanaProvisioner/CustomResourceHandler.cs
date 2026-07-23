@@ -193,9 +193,10 @@ public sealed class CustomResourceHandler
                 ["title"] = FolderTitle,
             },
             HttpStatusCode.OK,
-            HttpStatusCode.Conflict);
+            HttpStatusCode.Conflict,
+            HttpStatusCode.PreconditionFailed);
 
-        if (response.StatusCode == HttpStatusCode.Conflict)
+        if (response.StatusCode is HttpStatusCode.Conflict or HttpStatusCode.PreconditionFailed)
         {
             _ = await GrafanaCallAsync(
                 endpoint,
