@@ -16,9 +16,11 @@ Grafana.
 
 ## Dashboard preview
 
-The repository includes two importable Grafana dashboards. The images below are conceptual
-prototype mockups with fabricated values—not captures of the deployed workspace—so individual
-panel placement may differ from the current JSON. Deployed dashboards query live Athena data.
+The repository includes two committed Grafana dashboard definitions. They are imported manually
+into the permanent workspace and reconciled automatically by the temporary integration spike.
+The images below are conceptual prototype mockups with fabricated values—not captures of either
+deployed workspace—so individual panel placement may differ from the current JSON. Deployed
+dashboards query live Athena data.
 
 ### Fleet overview
 
@@ -39,7 +41,7 @@ Dashboard JSON:
 - [Fleet Overview](.scratch/kiro-usage-dashboard/dashboards/a-fleet-overview.json)
 - [User Drilldown](.scratch/kiro-usage-dashboard/dashboards/b-user-drilldown.json)
 
-## What it does
+## What the primary pipeline does
 
 1. Kiro writes User Activity Report CSVs to a versioned raw S3 bucket.
 2. An S3 `ObjectCreated` notification invokes a .NET 10 Lambda.
@@ -62,28 +64,72 @@ rather than creating misleading analytics data.
 
 ## Architecture
 
+### Primary pipeline (`KiroInfraStack`)
+
 ```mermaid
 flowchart LR
     Kiro[Kiro User Activity Reports] --> Raw[(Versioned raw S3 bucket)]
-    Raw -->|ObjectCreated: *.csv| Lambda[.NET 10 ingest Lambda]
+    Raw -->|Live ObjectCreated: *.csv| Lambda[.NET 10 ingest Lambda]
+    Backfill[scripts/backfill.sh] -->|Async backfill request| Lambda
+    Lambda -.->|List and read historical reports| Raw
     Target[SSM Target List] --> Lambda
 
     Lambda --> Usage[(usage_daily Parquet)]
     Lambda --> Models[(model_messages Parquet)]
     Lambda --> State[(S3 sequencer state)]
+    Lambda --> Logs[CloudWatch structured logs]
 
     Usage --> Glue[Glue projected tables]
     Models --> Glue
     Glue --> Athena[Athena workgroup: kiro-usage]
-    Athena --> Grafana[Amazon Managed Grafana]
+    Athena --> Grafana[Amazon Managed Grafana: Kiro-Usage]
 
-    Lambda -->|failed async invocation| DLQ[SQS dead-letter queue]
+    Lambda -->|Failed async invocation| DLQ[SQS dead-letter queue]
     Lambda --> Errors[CloudWatch Lambda error alarm]
     DLQ --> Depth[CloudWatch DLQ depth alarm]
 ```
 
-Everything runs in one AWS account and one region. The raw, analytics, Lambda, Glue, Athena, and
-Grafana resources are co-located in `us-east-1` by default.
+The primary stack runs in one AWS account and one region. Its raw, analytics, Lambda, Glue,
+Athena, and permanent Grafana resources are co-located in `us-east-1` by default.
+
+### Temporary Grafana automation spike
+
+```mermaid
+flowchart LR
+    subgraph Identity["us-east-2 · KiroIdentityFoundationStack"]
+        Groups[IAM Identity Center groups<br/>Admins · Editors · Viewers]
+    end
+
+    subgraph Data["us-east-1 · existing KiroInfraStack data plane"]
+        Analytics[(Analytics S3)]
+        GlueCatalog[Glue catalog]
+        AthenaData[Athena workgroup]
+        Analytics --> AthenaData
+        GlueCatalog --> AthenaData
+    end
+
+    subgraph Spike["us-east-1 · KiroGrafanaIntegrationSpikeStack"]
+        Assets[Committed dashboard JSON<br/>CDK S3 assets]
+        Provider[.NET 10 custom-resource Lambda]
+        Workspace[Temporary Managed Grafana workspace]
+        Assets --> Provider
+        Provider -->|Short-lived Admin token:<br/>folder, data source, dashboards| Workspace
+    end
+
+    Groups -->|Group IDs as parameters| Provider
+    Provider -->|Admin, Editor, and Viewer role assignments| Workspace
+    Workspace -->|Scoped data-source role| AthenaData
+```
+
+This second path is deliberately isolated from the permanent `Kiro-Usage` workspace. The
+foundation stack retains the three Identity Center groups in their `us-east-2` home Region; the
+temporary `us-east-1` stack imports the existing analytics bucket by name and creates a separate
+workspace plus its reconciliation provider.
+
+The spike is not yet the production authorization model. Validation proved that a standard
+Grafana Viewer cannot edit dashboards but can submit arbitrary queries through the Athena data
+source. That dashboard-only access requirement must be resolved before this automation moves into
+`KiroInfraStack`.
 
 ## Data layout
 
@@ -102,7 +148,7 @@ sequencers prevent older overwrite events from replacing newer facts.
 
 ## AWS resources
 
-The CDK stack creates:
+`KiroInfraStack` creates:
 
 - Versioned, Kiro-writable raw S3 bucket
 - Analytics S3 bucket with 14-day expiry for `athena-results/`
@@ -120,6 +166,13 @@ The CDK stack creates:
 Buckets and an optional KMS key use `RETAIN`, so destroying the stack does not automatically
 delete retained data.
 
+The temporary automation workflow adds:
+
+- `KiroIdentityFoundationStack` in `us-east-2`: three retained IAM Identity Center groups for
+  Grafana Admins, Editors, and Viewers.
+- `KiroGrafanaIntegrationSpikeStack` in `us-east-1`: an isolated Managed Grafana workspace,
+  scoped Athena role, .NET 10 custom-resource Lambda, and packaged dashboard assets.
+
 ## Prerequisites
 
 Install or configure:
@@ -128,8 +181,8 @@ Install or configure:
 - AWS CLI v2 and an authenticated profile
 - Node.js/npm for the AWS CDK CLI (`npx cdk`)
 - .NET 8 SDK for `KiroInfra`
-- .NET 10 SDK for `KiroIngest` and its tests
-- Docker, used by CDK to publish the .NET 10 Lambda asset
+- .NET 10 SDK for `KiroIngest`, `KiroGrafanaProvisioner`, and the tests
+- Docker, used by CDK to bundle the .NET 10 Lambda assets
 - `jq`, used by `scripts/backfill.sh`
 - IAM Identity Center enabled in the AWS account
 - A bootstrapped CDK environment in the target account and region
@@ -165,8 +218,10 @@ cd kiro-usage-pipeline
 
 dotnet restore src/KiroInfra.sln
 dotnet restore test/KiroIngest.Tests/KiroIngest.Tests.csproj
+dotnet restore src/KiroGrafanaProvisioner/KiroGrafanaProvisioner.csproj
 dotnet build src/KiroInfra.sln
 dotnet build src/KiroIngest/KiroIngest.csproj
+dotnet build src/KiroGrafanaProvisioner/KiroGrafanaProvisioner.csproj
 ```
 
 ### 2. Review the deployment
@@ -476,6 +531,7 @@ ORDER BY date, user_email;
 
 ```text
 src/KiroInfra/          C# CDK stack and constructs (.NET 8)
+src/KiroGrafanaProvisioner/  Temporary Grafana reconciliation provider Lambda (.NET 10)
 src/KiroIngest/         Event handler, validation, transform, and Parquet writer (.NET 10)
 test/KiroIngest.Tests/  TUnit test executable (.NET 10)
 scripts/backfill.sh     Asynchronous historical backfill helper
@@ -491,6 +547,7 @@ CONTEXT.md               Domain glossary
 ```bash
 dotnet build src/KiroInfra.sln
 dotnet build src/KiroIngest/KiroIngest.csproj
+dotnet build src/KiroGrafanaProvisioner/KiroGrafanaProvisioner.csproj
 ```
 
 ### Test
@@ -510,7 +567,7 @@ npx cdk synth --profile "$AWS_PROFILE" --strict
 npx cdk diff --profile "$AWS_PROFILE" --strict
 ```
 
-Docker is required because synthesis bundles the Lambda with
+Docker is required because synthesis bundles the .NET 10 Lambda projects with
 `mcr.microsoft.com/dotnet/sdk:10.0`.
 
 ### Work on the dashboards
