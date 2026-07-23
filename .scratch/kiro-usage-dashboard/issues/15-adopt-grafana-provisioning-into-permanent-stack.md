@@ -2,7 +2,7 @@
 
 **Type:** task
 
-**Status:** needs-triage
+**Status:** ready-for-human
 
 **What to build:** Move the proven Grafana automation path out of the temporary
 integration spike and into `KiroInfraStack`, so deploying the permanent stack reconciles the
@@ -65,6 +65,17 @@ is assigned to the permanent workspace.
 
 ## Comments
 
+- 2026-07-23 — **IMPLEMENTED AND DEPLOYED.** `GrafanaProvisioning` is wired into
+  `KiroInfraStack` (`src/KiroInfra/KiroInfraStack.cs`); group IDs flow from
+  `KiroIdentityFoundationStack` outputs through `cdk.json` context (`GrafanaAdminGroupId`,
+  `GrafanaEditorGroupId`, `GrafanaViewerGroupId`) rather than per-deploy `--parameters`.
+  Deploy verification: `UPDATE_COMPLETE` with the custom resource reconciling the permanent
+  workspace; `list-permissions` shows the operator SSO user plus ADMIN/EDITOR/VIEWER SSO
+  groups; `list-workspace-service-accounts` is empty (ephemeral credential lifecycle holds);
+  dashboards reconciled with `overwrite: true` (fleet v7, drilldown v7 at adoption).
+  Viewer access-model note: the provisioner assigns the viewers group VIEWER role, but
+  group membership stays manual per the issue-14 docs, so the dashboard-only Viewer
+  decision only becomes live when a human is added to that group.
 - 2026-07-22 session evidence for why manual provisioning is not good enough: the one-off
   script path needed four debug rounds, including a silent `jq --slurpfile`/`stdin` trap
   that POSTed empty dashboard bodies (Grafana correctly returned

@@ -16,11 +16,12 @@ Grafana.
 
 ## Dashboard preview
 
-The repository includes two committed Grafana dashboard definitions. They are imported manually
-into the permanent workspace and reconciled automatically by the temporary integration spike.
-The images below are conceptual prototype mockups with fabricated values—not captures of either
-deployed workspace—so individual panel placement may differ from the current JSON. Deployed
-dashboards query live Athena data.
+The repository includes two committed Grafana dashboard definitions. The `GrafanaProvisioning`
+custom resource in `KiroInfraStack` reconciles them into the permanent workspace on every
+deploy (along with the `Kiro Usage` folder and the Athena data source), so the workspace
+always matches the committed JSON. The images below are conceptual prototype mockups with
+fabricated values—not captures of the deployed workspace—so individual panel placement may
+differ from the current JSON. Deployed dashboards query live Athena data.
 
 ### Fleet overview
 

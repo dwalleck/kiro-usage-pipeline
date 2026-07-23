@@ -15,6 +15,9 @@
     ]
   },
   "context": {
+    "GrafanaAdminGroupId": "51fb4560-0031-70ef-c96e-43e9572576a0",
+    "GrafanaEditorGroupId": "d15bf5f0-b0a1-70fb-4cf3-b8a5e974a5ad",
+    "GrafanaViewerGroupId": "910bd540-d061-7070-aa1d-570c6eefeaf5",
     "@aws-cdk-containers/ecs-service-extensions:enableDefaultLogDriver": true,
     "@aws-cdk/aws-apigateway:authorizerChangeDeploymentLogicalId": true,
     "@aws-cdk/aws-apigateway:disableCloudWatchRole": true,

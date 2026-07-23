@@ -91,8 +91,21 @@ namespace KiroInfra
 
             // Managed Grafana workspace + Athena data-source IAM role. IAM Identity
             // Center auth (instance exists in us-east-2; Managed Grafana auto-discovers
-            // it across regions). Dashboards are exported as JSON for manual import.
+            // it across regions).
             var grafana = new GrafanaWorkspace(this, "GrafanaWorkspace", analyticsBucket, QueryLayer.WorkGroupName);
+
+            // Grafana provisioning (issue 15): the custom-resource provider reconciles the
+            // Kiro Usage folder, the Athena data source, and the committed dashboard JSON on
+            // every deploy, so the workspace matches the repo instead of drifting from it.
+            // Group IDs come from KiroIdentityFoundationStack (us-east-2) via cdk.json context.
+            var adminGroupId = (string)Node.TryGetContext("GrafanaAdminGroupId")
+                ?? throw new System.InvalidOperationException("cdk context GrafanaAdminGroupId is required (KiroIdentityFoundationStack output)");
+            var editorGroupId = (string)Node.TryGetContext("GrafanaEditorGroupId")
+                ?? throw new System.InvalidOperationException("cdk context GrafanaEditorGroupId is required (KiroIdentityFoundationStack output)");
+            var viewerGroupId = (string)Node.TryGetContext("GrafanaViewerGroupId")
+                ?? throw new System.InvalidOperationException("cdk context GrafanaViewerGroupId is required (KiroIdentityFoundationStack output)");
+            _ = new GrafanaProvisioning(this, "GrafanaProvisioning", grafana.Workspace, analyticsBucket,
+                adminGroupId, editorGroupId, viewerGroupId, QueryLayer.DatabaseName, QueryLayer.WorkGroupName);
 
             new CfnOutput(this, "IngestLambdaName", new CfnOutputProps
             {
