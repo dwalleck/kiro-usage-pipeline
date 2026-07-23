@@ -67,8 +67,14 @@
         "refresh": 1,
         "sort": 1,
         "query": {
-          "query": "SELECT DISTINCT user_email FROM usage_daily ORDER BY 1",
-          "refId": "StandardVariableQuery"
+          "rawSQL": "SELECT DISTINCT user_email FROM usage_daily ORDER BY 1",
+          "format": 1,
+          "connectionArgs": {
+            "region": "__default",
+            "catalog": "__default",
+            "database": "__default"
+          },
+          "refId": "A"
         }
       },
       {
@@ -113,8 +119,14 @@
         "refresh": 1,
         "sort": 1,
         "query": {
-          "query": "SELECT DISTINCT model FROM model_messages ORDER BY 1",
-          "refId": "StandardVariableQuery"
+          "rawSQL": "SELECT DISTINCT model FROM model_messages ORDER BY 1",
+          "format": 1,
+          "connectionArgs": {
+            "region": "__default",
+            "catalog": "__default",
+            "database": "__default"
+          },
+          "refId": "A"
         }
       }
     ]
