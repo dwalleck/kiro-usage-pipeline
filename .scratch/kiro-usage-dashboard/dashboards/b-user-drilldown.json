@@ -644,7 +644,7 @@
         {
           "refId": "A",
           "format": 1,
-          "rawSQL": "SELECT date, client_type, credits_used, overage_credits_used, total_messages, chat_conversations, overage_enabled, new_user FROM usage_daily WHERE $__dateFilter(date) AND user_email = ${user_email:sqlstring} AND client_type IN (${client_type:sqlstring}) ORDER BY date DESC, client_type",
+          "rawSQL": "SELECT u.date, u.client_type, u.credits_used, u.overage_credits_used, u.total_messages, u.chat_conversations, m.top_model, u.overage_enabled, u.new_user FROM (SELECT * FROM usage_daily WHERE $__dateFilter(date) AND user_email = ${user_email:sqlstring} AND client_type IN (${client_type:sqlstring})) u LEFT JOIN (SELECT date, client_type, user_id, model AS top_model, row_number() OVER (PARTITION BY date, client_type, user_id ORDER BY messages DESC, model) AS rn FROM model_messages WHERE $__dateFilter(date) AND user_email = ${user_email:sqlstring}) m ON m.date = u.date AND m.client_type = u.client_type AND m.user_id = u.user_id AND m.rn = 1 ORDER BY u.date DESC, u.client_type",
           "connectionArgs": {
             "region": "__default",
             "catalog": "__default",
