@@ -49,7 +49,7 @@ namespace KiroInfra
                 Handler = "KiroGrafanaProvisioner",
                 MemorySize = 512,
                 Timeout = Duration.Minutes(10),
-                Description = "Reconciles temporary Kiro Grafana workspace roles, Athena source, and dashboards",
+                Description = "Reconciles Kiro Grafana workspace roles, the Athena data source, and dashboards",
                 Code = Code.FromAsset(ProvisionerProjectPath, new AssetOptions
                 {
                     AssetHashType = AssetHashType.OUTPUT,

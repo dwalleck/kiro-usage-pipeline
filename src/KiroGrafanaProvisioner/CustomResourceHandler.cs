@@ -13,7 +13,7 @@ using System.Text.Json.Serialization;
 namespace KiroGrafanaProvisioner;
 
 // Lambda-backed CloudFormation custom-resource provider. It owns only the
-// configuration inside the temporary workspace. A short-lived Grafana service-account
+// configuration inside the target workspace. A short-lived Grafana service-account
 // token exists for the duration of an invocation and is deleted in the finally block.
 public sealed class CustomResourceHandler
 {
@@ -22,7 +22,7 @@ public sealed class CustomResourceHandler
     private const string AthenaDataSourceUid = "kiro-athena";
     private const string AthenaDataSourceName = "Athena";
     private const string AthenaPluginId = "grafana-athena-datasource";
-    private const string ServiceAccountName = "kiro-integration-spike-provisioner";
+    private const string ServiceAccountName = "kiro-grafana-provisioner";
 
     private static readonly HttpClient Http = new()
     {
@@ -38,7 +38,7 @@ public sealed class CustomResourceHandler
     {
         using var requestDocument = await JsonDocument.ParseAsync(input);
         var request = requestDocument.RootElement;
-        var physicalResourceId = OptionalString(request, "PhysicalResourceId") ?? "kiro-grafana-integration-spike";
+        var physicalResourceId = OptionalString(request, "PhysicalResourceId") ?? "kiro-grafana-provisioning";
 
         try
         {
@@ -245,7 +245,7 @@ public sealed class CustomResourceHandler
                 ["database"] = properties.DatabaseName,
                 ["workgroup"] = properties.WorkGroupName,
                 // The workgroup enforces this output location; the explicit plugin
-                // value documents the same invariant for the integration spike.
+                // value documents the same invariant on the data source.
                 ["outputLocation"] = $"s3://{properties.AnalyticsBucketName}/athena-results/",
             },
         };
@@ -321,7 +321,7 @@ public sealed class CustomResourceHandler
                 ["dashboard"] = dashboard,
                 ["folderUid"] = FolderUid,
                 ["overwrite"] = true,
-                ["message"] = "Reconciled by Kiro Grafana integration spike",
+                ["message"] = "Reconciled by the Kiro Grafana provisioner",
             },
             HttpStatusCode.OK);
     }
