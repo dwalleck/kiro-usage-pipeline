@@ -103,7 +103,8 @@
             "value": "PLUGIN",
             "selected": true
           }
-        ]
+        ],
+        "query": "KIRO_CLI,KIRO_IDE,PLUGIN"
       },
       {
         "name": "model",
