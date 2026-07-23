@@ -12,7 +12,7 @@ namespace KiroInfra
         public CfnResource GrafanaEditors { get; }
         public CfnResource GrafanaViewers { get; }
 
-        internal IdentityFoundationStack(Construct scope, string id, IStackProps props = null) : base(scope, id, props)
+        internal IdentityFoundationStack(Construct scope, string id, IStackProps? props = null) : base(scope, id, props)
         {
             var identityStoreId = new CfnParameter(this, "IdentityStoreId", new CfnParameterProps
             {

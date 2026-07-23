@@ -5,6 +5,12 @@
     <TargetFramework>net8.0</TargetFramework>
     <!-- Roll forward to future major versions of the netcoreapp as needed -->
     <RollForward>Major</RollForward>
+    <Nullable>enable</Nullable>
+    <AnalysisLevel>latest-recommended</AnalysisLevel>
+    <!-- CA1711: DeadLetterQueue is the domain-correct name for an SQS queue property.
+         CA1861: constructs are instantiated once per synth; hoisting literal arrays to
+         static fields would hurt IaC readability for no measurable gain. -->
+    <NoWarn>CA1711;CA1861</NoWarn>
   </PropertyGroup>
 
   <ItemGroup>

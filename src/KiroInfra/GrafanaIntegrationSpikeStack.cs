@@ -9,7 +9,7 @@ namespace KiroInfra
     // or workspace in the production-named KiroInfraStack.
     public sealed class GrafanaIntegrationSpikeStack : Stack
     {
-        internal GrafanaIntegrationSpikeStack(Construct scope, string id, IStackProps props = null) : base(scope, id, props)
+        internal GrafanaIntegrationSpikeStack(Construct scope, string id, IStackProps? props = null) : base(scope, id, props)
         {
             Amazon.CDK.Tags.Of(this).Add("Purpose", "temporary-grafana-integration-spike");
             Amazon.CDK.Tags.Of(this).Add("Cleanup", "requires-explicit-approval");

@@ -17,13 +17,13 @@ namespace KiroInfra
         // Kiro writes to S3/KMS through the Amazon Q service principal.
         private const string KiroServicePrincipal = "q.amazonaws.com";
 
-        internal KiroInfraStack(Construct scope, string id, IStackProps props = null) : base(scope, id, props)
+        internal KiroInfraStack(Construct scope, string id, IStackProps? props = null) : base(scope, id, props)
         {
             // Optional KMS key for bucket encryption (toggle UseCustomKey in cdk.json context to enable).
             // Off by default: both buckets use SSE-S3 and there are zero KMS statements anywhere.
             // When enabled, configure it in: Kiro Console > Settings > Encryption key.
             var useCustomKey = (string)Node.TryGetContext("UseCustomKey") == "true";
-            Key encryptionKey = null;
+            Key? encryptionKey = null;
             if (useCustomKey)
             {
                 encryptionKey = new Key(this, "KiroEncryptionKey", new KeyProps
@@ -185,8 +185,8 @@ namespace KiroInfra
         private Bucket CreateProtectedBucket(
             string id,
             string nameSuffix,
-            Key encryptionKey,
-            ILifecycleRule[] lifecycleRules = null,
+            Key? encryptionKey,
+            ILifecycleRule[]? lifecycleRules = null,
             bool versioned = false)
         {
             return new Bucket(this, id, new BucketProps
