@@ -40,6 +40,14 @@ namespace KiroInfra
             IStringListParameter targetList) : base(scope, id)
         {
             var account = Stack.Of(this).Account;
+            var region = Stack.Of(this).Region;
+
+            // Explicit physical name (same convention as the DLQ): the backfill
+            // continuation self-invoke permission must name the function as a plain
+            // ARN string — referencing FunctionArn from the role's own default policy
+            // creates a CloudFormation circular dependency (Function DependsOn
+            // DefaultPolicy, DefaultPolicy GetAtt Function).
+            var functionName = $"kiro-ingest-{account}";
 
             // Kiro writes reports under <bucket>/AWSLogs/<account>/KiroLogs/user_report/...
             // (point Kiro's report location at the raw bucket root). Filtering to this
@@ -50,6 +58,7 @@ namespace KiroInfra
             {
                 Runtime = DotNet10,
                 Architecture = Architecture.X86_64,
+                FunctionName = functionName,
                 Handler = "KiroIngest",
                 MemorySize = 512,
                 Timeout = Duration.Minutes(15),
@@ -94,7 +103,7 @@ namespace KiroInfra
             {
                 Effect = Effect.ALLOW,
                 Actions = ["lambda:InvokeFunction"],
-                Resources = [Function.FunctionArn],
+                Resources = [$"arn:aws:lambda:{region}:{account}:function:{functionName}"],
             }));
 
             // Event-driven trigger (spec 7.4). CDK adds the scoped s3.amazonaws.com invoke
@@ -116,6 +125,10 @@ namespace KiroInfra
             });
 
             // Route failed async invocations (after retry exhaustion) to the DLQ.
+            // The execution role needs sqs:SendMessage on the DLQ: Lambda validates
+            // this when the EventInvokeConfig destination is created.
+            DeadLetterQueue.GrantSendMessages(Function);
+
             _ = new CfnEventInvokeConfig(this, "EventInvokeConfig", new CfnEventInvokeConfigProps
             {
                 FunctionName = Function.FunctionName,
