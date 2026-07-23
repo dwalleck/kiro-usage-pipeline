@@ -10,7 +10,8 @@ namespace KiroInfra
     // Managed Grafana workspace for the Kiro usage dashboards, wired to the
     // Athena workgroup via a scoped data-source IAM role. Auth: IAM Identity
     // Center (the account must have an Identity Center instance enabled).
-    // Dashboards are exported as JSON for manual import into the workspace.
+    // Dashboards are reconciled from the committed JSON by GrafanaProvisioning
+    // on every deploy.
     public class GrafanaWorkspace : Construct
     {
         public CfnWorkspace Workspace { get; }
