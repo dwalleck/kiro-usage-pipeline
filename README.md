@@ -127,10 +127,11 @@ foundation stack retains the three Identity Center groups in their `us-east-2` h
 temporary `us-east-1` stack imports the existing analytics bucket by name and creates a separate
 workspace plus its reconciliation provider.
 
-The spike is not yet the production authorization model. Validation proved that a standard
-Grafana Viewer cannot edit dashboards but can submit arbitrary queries through the Athena data
-source. That dashboard-only access requirement must be resolved before this automation moves into
-`KiroInfraStack`.
+The automation validated by the spike has since been adopted into `KiroInfraStack` (issue 15),
+and the spike deployment was destroyed on 2026-07-22. One caveat from validation still stands:
+a standard Grafana Viewer cannot edit dashboards but can submit arbitrary queries through the
+Athena data source. Until a dashboard-only access model is chosen, keep the
+`kiro-usage-grafana-viewers` group empty.
 
 ## Data layout
 
@@ -246,6 +247,11 @@ npx cdk synth KiroInfraStack --profile "$AWS_PROFILE" --strict -c UseCustomKey=t
 npx cdk deploy KiroInfraStack --profile "$AWS_PROFILE" --strict
 ```
 
+The stack requires the `GrafanaAdminGroupId`, `GrafanaEditorGroupId`, and `GrafanaViewerGroupId`
+context values in `cdk.json` (committed for this account). They are the
+`KiroIdentityFoundationStack` output IDs; redeploy that stack and refresh the context if the
+Identity Center groups are ever recreated.
+
 Important stack outputs include:
 
 | Output | Purpose |
@@ -327,48 +333,39 @@ Backfill invocation is asynchronous. Each invocation handles one S3 listing page
 next page when necessary, and continues past individual bad objects before reporting an aggregate
 failure. Monitor CloudWatch and the DLQ for completion or errors.
 
-### 7. Assign a Grafana administrator
+### 7. Get Grafana access
 
-The workspace uses IAM Identity Center. After deployment:
+Workspace roles are assigned automatically: each deploy grants the three Identity Center groups
+the Admin, Editor, and Viewer workspace roles. Group membership stays manual:
 
-1. Open **Amazon Managed Grafana → Kiro-Usage**.
-2. Assign an IAM Identity Center user or group to the workspace.
-3. Give the initial operator the **Admin** workspace role.
-4. Open `GrafanaWorkspaceUrl` and sign in.
+1. In IAM Identity Center (`us-east-2`), add the operator to `kiro-usage-grafana-admins`.
+2. Open `GrafanaWorkspaceUrl` and sign in.
 
-### 8. Configure Athena in Grafana
+Leave `kiro-usage-grafana-viewers` empty until the Viewer access-model caveat above is resolved.
 
-In Grafana, open **Connections → Data sources → Add data source → Athena** and set:
+### 8. Verify the provisioned Grafana configuration
 
-| Setting | Value |
-| --- | --- |
-| Name | `Athena` |
-| Authentication provider | Workspace IAM role |
-| Default region | `us-east-1` |
-| Catalog | `AwsDataCatalog` |
-| Database | `kiro_usage` |
-| Workgroup | `kiro-usage` |
-| Output location | `s3://<AnalyticsBucketName>/athena-results/` |
+The `GrafanaProvisioning` custom resource configures the workspace during every deploy — the
+`Kiro Usage` folder, the `Athena` data source (health-checked against the `kiro-usage`
+workgroup), and both committed dashboards. There is nothing to configure by hand; to verify:
 
-Select **Save & test** and confirm the connection succeeds.
+1. In Grafana, open **Connections → Data sources → Athena** and confirm **Save & test** passes.
+2. Open the **Kiro Usage** folder and confirm both dashboards are present and render data.
 
-### 9. Import the dashboards
-
-1. Create a Grafana folder named **Kiro Usage**.
-2. Open **Dashboards → New → Import**.
-3. Import:
-   - `.scratch/kiro-usage-dashboard/dashboards/a-fleet-overview.json`
-   - `.scratch/kiro-usage-dashboard/dashboards/b-user-drilldown.json`
-4. Select the `Athena` data source and save each dashboard in the **Kiro Usage** folder.
+Do not configure the folder, data source, or dashboards through the Grafana UI — the committed
+JSON is the source of truth, and the next deploy overwrites UI drift (see
+[the dashboards README](.scratch/kiro-usage-dashboard/dashboards/README.md)).
 
 The dashboards expose shared `$user_email`, `$client_type`, and `$model` variables. Date filters
 are applied to partition keys so Athena can prune scans.
 
-## Temporary Grafana integration spike
+## Temporary Grafana integration spike (retired)
 
-This workflow proves automated workspace-role assignment, Athena data-source configuration, and
+This workflow proved automated workspace-role assignment, Athena data-source configuration, and
 dashboard reconciliation against a separate workspace named `Kiro-Usage-Integration-Spike`. It
-does not modify the production-named `Kiro-Usage` workspace in `KiroInfraStack`.
+does not modify the production-named `Kiro-Usage` workspace in `KiroInfraStack`. The pattern was
+adopted into `KiroInfraStack` (issue 15) and the spike deployment was destroyed on 2026-07-22;
+this section remains as the recipe for re-running the isolated validation.
 
 > [!WARNING]
 > The commands in this section create AWS resources and incur Amazon Managed Grafana charges.
@@ -532,7 +529,7 @@ ORDER BY date, user_email;
 
 ```text
 src/KiroInfra/          C# CDK stack and constructs (.NET 8)
-src/KiroGrafanaProvisioner/  Temporary Grafana reconciliation provider Lambda (.NET 10)
+src/KiroGrafanaProvisioner/  Grafana workspace reconciliation provider Lambda (.NET 10)
 src/KiroIngest/         Event handler, validation, transform, and Parquet writer (.NET 10)
 test/KiroIngest.Tests/  TUnit test executable (.NET 10)
 scripts/backfill.sh     Asynchronous historical backfill helper
@@ -610,5 +607,5 @@ Docker is required because synthesis bundles the .NET 10 Lambda projects with
 
 - [POC specification](.scratch/kiro-usage-dashboard/spec.md)
 - [Wayfinder map and decisions](.scratch/kiro-usage-dashboard/map.md)
-- [Dashboard import guide](.scratch/kiro-usage-dashboard/dashboards/README.md)
+- [Dashboard provisioning notes](.scratch/kiro-usage-dashboard/dashboards/README.md)
 - [Domain glossary](CONTEXT.md)
