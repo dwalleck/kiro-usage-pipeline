@@ -261,7 +261,7 @@
       "targets": [
         {
           "refId": "A",
-          "format": 0,
+          "format": 1,
           "rawSQL": "SELECT max(subscription_tier) AS tier FROM usage_daily WHERE $__dateFilter(date) AND user_email = ${user_email:sqlstring} AND client_type IN (${client_type:sqlstring})",
           "connectionArgs": {
             "region": "__default",
